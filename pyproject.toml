@@ -24,7 +24,19 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = []
+dependencies = [
+  "coverage[toml]>=6.5",
+  "pytest",
+  "jinja2>=3.1.6",
+  "pint-xarray>=0.2.1",
+  "xarray>=0.11",
+  "geopandas>=0.13.2",
+  "pandas>=1.4.0",
+  "numpy>=1.22.2",
+  "typing_extensions>=4.7.1",
+  "click>=8.1.2",
+  "netCDF4>=1.6.4",
+]
 
 [project.urls]
 Documentation = "https://github.com/Kasra Farmer/summaflow#readme"
