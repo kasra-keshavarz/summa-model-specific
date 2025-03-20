@@ -55,23 +55,38 @@ class SUMMAWorkflow(object):
         information provided in `topology`. This object serves
         as HRU information for SUMMA applications. If it equals to
         `None`, then each HRU will be equal to GRU elements.
-    forcing_files : a sequence of :obj:`str` or |PathLike|
+    forcing_data : a sequence of :obj:`str` or |PathLike|
         A sequence to NetCDF files describing forcing data for the
         SUMMA application of interest.
     forcing_vars : :obj:`dict` of :obj:`str`
         The keys are the variable names included in `forcing_files`
         that should be included in the final forcing dataset(s). The
         corresponding values are the accepted names SUMMA needs.
-    forcing_units : :obj:`dict` of :obj:`str`
+    forcing_units : :obj:`dict` of :obj:`str` keys and values
         The keys are the **accepted** variable names for SUMMA, and
         values are the original units provided in `forcing_files`.
         The units follow the standards of Pint's `default_en.txt`
         manual. See the relevant reference.
-    forcing_to_units : :obj:`dict` of :obj:`str`
+    forcing_to_units : :obj:`dict` of :obj:`str` keys and values
         The keys are the **accepted** variable names for SUMMA, and
         values are the **accepted**  units for SUMMA. The units
         follow the standards of Pint's `default_en.txt` manual. See
         the relevant reference.
+    topology_data : :obj:`dict` of :obj:`str` sequences
+        Topology data generally consists of auxillary data needed to
+        analyze `riv`, `cat`, and `hru` objects. The keys are the
+        strings of each mentioned objects, and values include data
+        labels in each object needed to be included in the final
+        model setup.
+    topology_units : :obj:`dict`
+        Original units for all data labels included in `topology_data`
+        elements
+    topology_to_units : :obj:`dict`
+        **Acceptable** units of all data labels included in
+        `topology_data` elements SUMMA requires
+    geospatial_data : :obj:
+        
+
 
     Properties
     ----------
@@ -90,35 +105,15 @@ class SUMMAWorkflow(object):
     # main constructor
     def __init__(
         self,
-        riv: str | os.PathLike | gpd.GeoDataFrame,
-        cat: str | os.PathLike | gpd.GeoDataFrame,
-        hru: str | os.PathLike | gdp.GeoDataFrame,
-        forcing_files: Sequence[str | os.PathLike],
-        forcing_vars: Sequence[str],
-        forcing_units: Dict[str, str] = None,
-        forcing_to_units: Dict[str, str] = None,
-        topology: Dict[str, str | int] = None,
+        forcing_data: Sequence[str | os.PathLike],
+        forcing_attrs: Dict[str] = None,
+        topology_data: Dict[str, str | int] = None,
         topology_attrs: Dict[str, str] = None,
-        topology_units: Dict[str, str] = None,
-        topology_to_units: Dict[str, str] = None,
-        local_attrs: Dict[str, Dict] = None,
-        global_attrs: Dict[str, Dict] = None,
+        geospatial_data: Dict[str, Dict] = None,
+        geospatial_attrs: Dict[str, Dict] = None,
         dims: Dict[str, str] = None,
     ) -> None:
 
         """
         Main constructor of SUMMAWorkflow
-
-        Note
-        ----
-        `hru` needs to provide mapping information to `cat`. Please note
-        that `hru` can also be equal to `cat`.
-        
-        outlet_value: int = -9999,
-        main_id: str,
-        ds_main_id: str,
-        riv_cols: Dict[str, Union[str, int]] = None,
-        cat_cols: Dict[str, Union[str, int]] = None,
-        gru_dim: str = 'gru',
-        hru_dim: str = 'hru',
         """
