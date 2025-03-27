@@ -10,6 +10,7 @@ import geopandas as gpd
 import xarray as xr
 import pint
 import jinja2 as jij
+import pint_xarray
 
 from typing import (
     Dict,
@@ -40,6 +41,9 @@ from ._default_dicts import (
 )
 from .utils import (
     _init_empty_ds,
+    _mapping_hru,
+    _calculate_centroids,
+    _calculate_polygon_areas
 )
 
 
@@ -76,10 +80,9 @@ class SUMMAWorkflow(object):
         forcing_units: Dict[str, str],
         forcing_to_units: Dict[str, str],
         topology_data: Dict[str, str | int],
-        topology_vars: Dict,
+        topology_attrs: Dict[str, str],
         topology_units: Dict[str, str],
         topology_to_units: Dict[str, str],
-        topology_attrs: Dict[str, str],
         geospatial_data: Dict[str, Dict] = None,
         dims: Dict[str, str] = default_dims,
     ) -> None:
@@ -116,27 +119,34 @@ class SUMMAWorkflow(object):
             :obj:`str` of each mentioned objects, and values include data
             labels in each object needed to be included in the final
             model setup.
-        topology_vars : :obj:`dict` of :obj:`str` keys and values
-            Topology variables needed from the objects read through
-            `topology_data`. Critical keys are: *segId*, *downSegId*,
-            *slope*, *length*, *hruToSegId*, *tan_slope*. Any other
-            additional labels will be added to SUMMA's Attribute NetCDF
-            file for user's convenience.
         topology_units : :obj:`dict`
             Original units for all data labels included in `topology_data`
             elements
         topology_to_units : :obj:`dict`
             **Acceptable** units of all data labels included in
             `topology_data` elements SUMMA requires
+        topology_attrs : :obj:`dict` of str
+            Containing necessary attributes and metadata. **Necessary** keys
+            are 
         geospatial_data : :obj:`dict`
             Additional geospatial data used in parameterizing SUMMA.
-            Acceptable keys are: *heightCanopyTop*
+            Acceptable keys are:
+               * *heightCanopyTop*
+               * *vegTypeIndex*
+               * *soilTypeIndex*
+               * *elevation*
         dims : :obj:`dict`, optional
             Critical dimnesion names. Acceptable keys are *hru* and *gru*.
 
         Note
         ----
         The following lists the elements of `topology_data`
+        topology_vars : :obj:`dict` of :obj:`str` keys and values
+            Topology variables needed from the objects read through
+            `topology_data`. Critical keys are: *segId*, *downSegId*,
+            *slope*, *length*, *hruToSegId*, *tan_slope*. Any other
+            additional labels will be added to SUMMA's Attribute NetCDF
+            file for user's convenience.
         riv : :obj:`str` or |PathLike| or |GeoDataFrame|
            River graph object. Either the path to the object should be
            given or a geopandas.GeoDataFrame containing information
@@ -171,11 +181,11 @@ class SUMMAWorkflow(object):
         #        sake of timing of this deliverable, we compromise and treat
         #        them as different variables starting with `forcing_`.
         self._forcing = forcing_data
-        self._forcing_attrs = forcing_attrs
         self.forcing_vars = forcing_vars
+        self._forcing_attrs = forcing_attrs
         self.forcing_units = forcing_units
         self.forcing_to_units = forcing_to_units
-        
+ 
         # topology data
         # `riv` is optional, as single-site configurations, do not have
         # any river systems involved
@@ -194,8 +204,10 @@ class SUMMAWorkflow(object):
         # `hru` object
         self.hru = topology_data.get('hru')
 
-        # `topology_attrs` object
+        # `topology_*` object
         self.topology_attrs = topology_attrs
+        self.topology_units = topology_units
+        self.topology_to_units = topology_to_units
 
         # dimension names
         self.dims = dims
@@ -267,18 +279,51 @@ class SUMMAWorkflow(object):
         # Note:
         #     If needed, the hard-coded names & values here can be transformed
         #     to be read from the input objects.
-        slope_type_index_values = [1.0] * len(self.gru)
+        slope_type_index_values = [int(1)] * len(self.gru)
         self.attrs['slopeTypeIndex'] = xr.DataArray(slope_type_index_values, dims=self.dims['hru'])
 
         # 3. `hruId` and `gruId` values
         # Note:
         #     If needed, the hard-coded names here can be transformed to be read
         #     from the input objects.
-        self.attrs['gruId'] = xr.DataArray(self.gru['COMID'], coords={'gru': self.gru['COMID'].values})
-        self.attrs['hruId'] = xr.DataArray(self.hru['COMID'], coords={'hru': self.hru['COMID'].values})
+        self.attrs['gruId'] = xr.DataArray(self.gru['COMID'], coords={'gru': self.gru[gru_fid]})
+        self.attrs['hruId'] = xr.DataArray(self.hru['COMID'], coords={'hru': self.hru[hru_fid]})
 
         # 4. `hru2gruId` values
-        #    
+        # Note:
+        #     The `topology` needs to become a systematic object using
+        #     `hydrant` but unfortunately the project is being dropped.
+        mapping = _mapping_hru(
+            hru=self.hru,
+            gru_label=gru_fid,
+            hru_label=hru_fid,
+        )
+        self.attrs['hru2gruId'] = xr.DataArray(
+            pd.Series(mapping),
+            dims=["hru"],    # Name of the dimension
+            name="hru2gruId" # Name of the variable
+        )
+
+        # 5. `latitude` and `longitude`
+        # Note:
+        #     The values are extracted for the centroid of each `hru`
+        # First, calculate centroids; EPSG 6933 is hard-coded for accuracy
+        # the returned object will contain data labels `centroid_y` and
+        # `centroid_x`
+        coords_defs = {
+            'latitude': 'centroid_x',
+            'longitude': 'centroid_y',
+        }
+        centroids = _calculate_centroids(self.hru, calculation_crs=6933)
+        for k, v in coords_defs.items():
+            self.attrs[k] = xr.DataArray(centroids[v], coords={'hru': centroids[hru_fid]})
+
+        # 6. `area` values
+        # Notes:
+        #    the `target_area_unit` is hard-coded as it is SUMMA's
+        #    default requirement.
+        self.areas = _calculate_polygon_areas(self.hru, target_area_unit='m^2')
+        self.attrs['HRUarea'] = 
 
 
     def __repr__(
