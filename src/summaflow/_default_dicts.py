@@ -137,3 +137,9 @@ forcing_global_attrs_default = {
         'f{__about__.version}'
         ),
 }
+
+
+default_dims = {
+    'hru': 'hru',
+    'gru': 'gru',
+}
