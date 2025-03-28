@@ -134,11 +134,11 @@ def _mapping_hru(
 
     # Create and return the mapping
     mapping = hru.groupby(hru_label)[gru_label].first().to_dict()
-    
+ 
     # Verify mapping completeness
     if len(mapping) != len(hru):
         raise RuntimeError("Unexpected error in mapping creation - size mismatch")
-    
+ 
     return mapping
 
 

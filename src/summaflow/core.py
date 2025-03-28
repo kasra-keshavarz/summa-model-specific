@@ -305,7 +305,7 @@ class SUMMAWorkflow(object):
         )
 
         # 5. `latitude` and `longitude`
-        # Note:
+                # Note:
         #     The values are extracted for the centroid of each `hru`
         # First, calculate centroids; EPSG 6933 is hard-coded for accuracy
         # the returned object will contain data labels `centroid_y` and
@@ -314,16 +314,53 @@ class SUMMAWorkflow(object):
             'latitude': 'centroid_x',
             'longitude': 'centroid_y',
         }
-        centroids = _calculate_centroids(self.hru, calculation_crs=6933)
+        centroids = _calculate_centroids(self.hru)
         for k, v in coords_defs.items():
             self.attrs[k] = xr.DataArray(centroids[v], coords={'hru': centroids[hru_fid]})
 
         # 6. `area` values
         # Notes:
         #    the `target_area_unit` is hard-coded as it is SUMMA's
-        #    default requirement.
-        self.areas = _calculate_polygon_areas(self.hru, target_area_unit='m^2')
-        self.attrs['HRUarea'] = 
+        #    default requirement. The returned object of this function
+        #    includes a column named `area`.
+        #    The unit of area is critical, so they have been assigned now;
+        #    for all other variables, they are added later.
+        areas = _calculate_polygon_areas(self.hru, target_area_unit='m^2')
+        area_unit = areas['area'].pint.units
+        self.attrs['HRUarea'] = xr.DataArray(
+            data=areas['area'].pint.magnitude,
+            coords={'hru': areas[hru_fid].values},
+            attrs={'unit': area_unit})
+
+        # Up to Martyn & his staff: the values decided in various workflows
+        #    are inconsistent.
+        #
+        # 7. `tan_slope` values
+        #    Darri: uses np.gradient
+        #    Mohamed: uses river slope values
+        #    Wouter: uses 0.1 constant value
+        #
+        # 8. `contourLength` values
+        #    Darri: uses the length of intersection between an HRU
+        #           and its downstream neighbor. [KK: how one can calculate
+        #           a downstream HRU?]. Or, he uses the square root of HRU
+        #           area.
+        #    Mohamed: the length around the riparian zone (i.e., length of
+        #             stream *2).
+        #    Wouter: uses 30m constant value
+        #
+        # 9. `downHRUindex` values
+        #    Martyn: for non-contiguous HRUs, assign downHRUindex the
+        #            riparian, contiguous one
+        #    Darri: sets the downHRUindex based on elevation data
+        #    Mohamed: all constant 0 values
+        #    Wouter: Set the downHRUindex based on elevation data
+
+        # 10. `geospatial` layers
+        # 10.1 `eleveation` layer
+
+        # 10.2 `vegTypeIndex` layer
+        # 10.3 `soilTypeIndex` layer
 
 
     def __repr__(
