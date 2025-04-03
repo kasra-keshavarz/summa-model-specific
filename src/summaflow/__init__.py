@@ -5,3 +5,7 @@ from .core import (
     SUMMAWorkflow,
 )
 
+from .geospatial import (
+    Stats,
+    GeoLayer,
+)

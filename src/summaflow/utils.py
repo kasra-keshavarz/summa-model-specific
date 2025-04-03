@@ -14,9 +14,14 @@ from pyproj import CRS
 from pint import UnitRegistry
 
 # built-in imports
+from collections import (
+    Counter,
+)
 from typing import (
     Dict,
     Sequence,
+    Any,
+    List,
 )
 import warnings
 
@@ -331,3 +336,93 @@ def _calculate_polygon_areas(
     return result_gdf
 
 
+def unique_dict_values(
+    d: Dict[Any, Any]
+) -> Dict[Any, Any]:
+    """Extract keys from a dictionary whose values appear exactly once.
+
+    This function identifies all keys in a dictionary whose values have
+    exactly one occurrence across all key-value pairs.
+
+    Parameters
+    ----------
+    d : Dict[Any, Any]
+        The input dictionary to analyze. Keys and values can be of any hashable type.
+
+    Returns
+    -------
+    Dict[Any, Any]
+        A list of keys whose values appear exactly once in the dictionary.
+        The order is not guaranteed (depends on Python's hash implementation).
+
+    Examples
+    --------
+    >>> unique_dict_values({'a': 1, 'b': 2, 'c': 1, 'd': 3})
+    {'b': '2', 'd': '3'}
+
+    >>> unique_dict_values({'x': 'apple', 'y': 'banana', 'z': 'apple'})
+    {'y': 'banana'}
+
+    Notes
+    -----
+    - The function uses collections.Counter for efficient counting
+    - For Python 3.7+, you can use dict instead of OrderedDict as insertion
+      order is preserved by default
+    - All dictionary values must be hashable types
+    """
+    # Count occurrences of all values
+    value_counts = Counter(d.values())
+    
+    # Get the set of unique values (appear exactly once)
+    unique_values = {value for value, count in value_counts.items() if count == 1}
+    
+    # Return keys that map to these unique values
+    return {key: value for key, value in d.items() if value in unique_values}
+
+
+def nonunique_dict_values(
+    d: Dict[Any, Any]
+) -> Dict[Any, Dict]:
+    """Extract keys from a dictionary whose values appear more than once.
+
+    This function identifies all keys in a dictionary whose values have
+    multiple occurrences across key-value pairs.
+
+    Parameters
+    ----------
+    d : Dict[Any, Any]
+        The input dictionary to analyze. Keys and values must be hashable.
+
+    Returns
+    -------
+    Dict[Any, Any]
+        A list of keys whose values appear more than once in the dictionary.
+        The order is not guaranteed.
+
+    Examples
+    --------
+    >>> nonunique_dict_values({'a': 1, 'b': 2, 'c': 1, 'd': 3})
+    {1: ['c', 'a']}
+
+    >>> nonunique_dict_values({'x': 'apple', 'y': 'banana', 'z': 'apple', 'w': 'banana'})
+    {'banana': ['y', 'w'], 'apple': ['x', 'z']}
+
+    Notes
+    -----
+    - If a value appears multiple times, all keys mapping to it are included.
+    - Uses `collections.Counter` for efficient counting.
+    - Values must be hashable.
+    """
+    value_counts = Counter(d.values())
+
+    non_unique_values = {value for value, count in value_counts.items() 
+        if count >= 2 and value is not None}
+
+    # Create a dictionary referring to repeated values as refer corresponding
+    # keys in a list - avoiding nested comprehensive dictionaries for
+    # legibility
+    dict_of_non_unique_values = {}
+    for value in non_unique_values:
+        dict_of_non_unique_values.update({value: [k for k, v in d.items() if v == value]})
+
+    return dict_of_non_unique_values
