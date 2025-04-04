@@ -166,3 +166,6 @@ examples/
 
 # Mac stuff
 .DS_Store
+
+# rasters
+*.tif
