@@ -86,19 +86,21 @@ class Stats(object):
         - For **q%**, the suffix string denotes a quantile; e.g., 10th quantile
           is represented with `q10`.
         """
-        # crude special occasion of exactextractr (MAF) or QGIS provided
-        # inputs
+        # Crude check for special occasion of exactextractr (MAF) or QGIS
+        # provided inputs
         if isinstance(stats, pd.DataFrame):
             self.data = stats
-            return 
 
-        # otherwise, check if `stats` is a Python dictionary
-        if not isinstance(stats, dict):
+        # Otherwise, check if `stats` is a Python dictionary
+        if not isinstance(stats, pd.DataFrame) and not isinstance(stats, dict):
             raise TypeError("`stats` must be of dtype dict.")
 
-        # otherwise, all good and build the object and use pandas
+        # Otherwise, all good and build the object and use pandas
         # DataFrame object for ease of use and flexibility
         self.data = pd.DataFrame.from_dict(stats)
+
+        # `None` default value for self.threshold
+        self.threshold = None
 
         return
 
@@ -137,11 +139,11 @@ class Stats(object):
         self,
     ) -> List[int | str | float]:
         """Extract all known classes based on ['frac'] values"""
-        return [Stats._regex_extract_frac(i) for i in self['frac']]
+        return [Stats.__regex_extract_frac(i) for i in self['frac']]
 
     # static methods
     @staticmethod
-    def _regex_extract_frac(
+    def __regex_extract_frac(
         string,
     ) -> int | str | float:
         """Extract values after frac_ values
@@ -152,6 +154,32 @@ class Stats(object):
            String starting with `frac_` based on the standards of this object.
         """
         return re.search(r"frac_([^_]+)", string).group(1)
+
+    @staticmethod
+    def __convert_list_dtype(
+        ls,
+    ) -> List[int | float | str]:
+        """Converts str elements of a list to int or float dtypes, if
+        feasible"""
+        # Just for reassurance
+        ls = list(ls)
+
+        # Convert to `int` or `float` dtype if feasible
+        converted = []
+
+        # Start conversion
+        for item in ls:
+            try:
+                # Try converting to int first
+                converted.append(int(item))
+            except ValueError:
+                try:
+                    # If int fails, try float
+                    converted.append(float(item))
+                except ValueError:
+                    # If both fail, keep original
+                    converted.append(item)
+        return converted
 
     # special methods
     def __getitem__(
@@ -286,10 +314,12 @@ class Stats(object):
         obj = rasterstats_obj # fix this
         return cls(obj)
 
+    # core functions
     def map_fracs(
         self: Self,
         mapping: Dict[Any, Any],
         inplace: bool = True,
+        autoupdate_stats: bool = False,
     ) -> Self:
         """Implement fraction renaming, summation, and renormalization
         of values, based on `mapping`
@@ -301,6 +331,9 @@ class Stats(object):
             target class system.
         inplace : bool [defaults to `True`]
             Doing the operations on the object. If not, set to `False`.
+        autoupdate_stats : bool [defaults to `False`]
+            Autoupdate other statistics, if applicable, based on new `frac`
+            values.
 
         Notes
         -----
@@ -329,6 +362,10 @@ class Stats(object):
         # summed, and removed.
         # keys: `frac` classes to rename, values: final name
         renaming = utils.unique_dict_values(mapping)
+        # Assuring there are no `None` values - they must be in the `removing`
+        # dictionary instead
+        renaming = {k: v for k, v in renaming.items() if v is not None}
+        # remove any `None` keys
         # keys: final name of the `classes` element, values: one or more
         # `classes` element
         summation = utils.nonunique_dict_values(mapping)
@@ -374,7 +411,13 @@ class Stats(object):
         # Add the summed items back to the main `df`
         df = pd.concat([df, temp_df_summation], axis=1)
         # Sort the column names just for aesthetics
-        df.sort_index(axis=1, inplace=True, ascending=False)
+        sorted_cols = [Stats.__regex_extract_frac(c) for c in df.columns]
+        # Convert dtype from str to int or float if possible
+        converted_cols = Stats.__convert_list_dtype(sorted_cols)
+        # Sort the values
+        converted_cols = [_prefix+str(c) for c in sorted(converted_cols)]
+        # Sort the columns
+        df = df[converted_cols]
 
         # After all the operations, if there are duplicate columns, raise an
         # Exception
@@ -385,28 +428,104 @@ class Stats(object):
         if len(removing.values()) >= 1:
             df = df.div(df.sum(axis=1), axis=0)
 
+        # If certain rows turn to have np.nan values due to adjustments above,
+        # turn them into zeros
+        df.fillna(0, inplace=True)
+
         # Change ['frac'] values to `df`
         if inplace == True:
             self['frac'] = df
             return df
         else:
             return df
-
-    @property
-    def frac_threshold(
+            
+    def _update_stats(
         self: Self,
     ) -> None:
-        """If fraction threshold is defined or not"""
-        return frac_threshold
+        """Adjust relevant statistics after `frac` changes"""
+        # Due to removal of certain classes, we need to adjust the statistics
+        # while also warning user of possible misalignment of stats
+        if 'minority' in self.stats:
+            self.minority = self['frac'].replace(0, np.nan).idxmin(axis=1)
 
-    @frac_threshold.setter
-    def _frac_threshold_setter(
-        self: Self,
-        threshold: float,
-    ) -> None:
-        """ """
+        if 'majority' in self.stats:
+            self.majority = self['frac'].replace(0, np.nan).idxmax(axis=1)
+
+        if 'min' in self.stats:
+            # Selecting the first non-zero class for the element;
+            # If element does not cover any classes (frac for all is 0), then
+            # report `np.nan` and a warning
+            min_lambda = lambda x: x.replace(0, np.nan).dropna().index[0] \
+                if not x.replace(0, np.nan).dropna().empty else np.nan
+            self.min = self['frac'].apply(min_lambda, axis=1)
+            # Send warning to user
+            wrn_msg = ("Some elements do not cover any classes, therefore, "
+                "corresponding `min` is set to `np.nan`.")
+            warnings.warn(wrn_msg)
+
+        if 'max' in self.stats:
+            # Selecting the last non-zero class for the element;
+            # If element does not cover any classes (frac for all is 0), then
+            # report `np.nan` and a warning
+            max_lambda = lambda x: x.replace(0, np.nan).dropna().index[-1] \
+                if not x.replace(0, np.nan).dropna().empty else np.nan
+            self.max = self['frac'].apply(max_lambda, axis=1)
+            # Send warning to user
+            wrn_msg = ("Some elements do not cover any classes, therefore, "
+                "corresponding `max` is set to `np.nan`.")
+            warnings.warn(wrn_msg)
+
+        if 'mean' in self.stats:
+           # Calculate new `mean`
+        if 'q' in self.stats:
+           # Calculate new `q`
+
+        # FIXME: new stat updates to be added later.
 
         return
+
+    def set_frac_threshold(
+        self: Self,
+        threshold: float | int,
+        inplace: bool = True,
+        autoupdate_stats: bool = False,
+    ) -> pd.DataFrame:
+        """Setting the `frac_threshold` value which removes those `classes`
+        having fractions less than `threshold` on average over all elements.
+
+        threshold : float
+            Threshold defining minimum fractions for 
+        """
+        # Check the dtype
+        if not isinstance(threshold, int | float):
+            raise TypeError("`threshold` ")
+        # Checking whether the relevant statistics exist in the first place
+        if 'frac' in self.stats:
+            # Setting the value
+            if inplace:
+                self.threshold = threshold
+
+            # Find average fraction over all elements
+            _average = self['frac'].mean(axis=0).copy()
+
+            # Find `frac` `class`es where they are less than `threshold`
+            _threshold_classes = _average.index[_average >= threshold]
+
+            # Resemble a mapping dictionary
+            _threshold_classes = [Stats.__regex_extract_frac(c) 
+                                      for c in _threshold_classes]
+            _psuedo_mapping = {k: None for k in _threshold_classes}
+
+            # cal map_fracs method
+            df = self.map_fracs(_psuedo_mapping, inplace=inplace)
+
+            return df
+
+        else:
+            raise ValueError("`frac_threshold` cannot be set without `frac` stats.")
+
+        return
+
 
 class GeoLayer(Stats):
     """GeoLayer defining geospatial data as a subclass of Stats
@@ -419,6 +538,7 @@ class GeoLayer(Stats):
     """
     def __init__(
         self: Self,
+        stats: Dict[str, Dict[str, Any]],
         layer: np.ndarray = None,
         geom: gpd.GeoDataFrame = None,
         engine: str = 'gdal',
@@ -427,19 +547,19 @@ class GeoLayer(Stats):
 
         Parameters
         ----------
-
+        layer : array-like
+            An array-like object representing raster layer of interest
+        geom : |GeoDataFrame|
+            A GeoDataFrame representing elements for which 
         """
-        # at least one input option should be provided
-        if layer is None and stats is None:
-            raise ValueError("Either `layer` or `stats` should be provided.")
-
+        super().__init__(
+            stats=stats
+        )
         # type of engine must be `str`
         if not isinstance(engine, str):
             raise ValueError("`engine` must have a dtype of `str`.")
 
         # assign attributes if provided
-        if stats:
-            self.stats = Stats
         if layer:
             if engine.lower() == 'gdal':
                 self.layer = layer
@@ -482,4 +602,3 @@ class GeoLayer(Stats):
             except:
                 raise ValueError("Cannot plot in non-interactive environment")
 
-        return

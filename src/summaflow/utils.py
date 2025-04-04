@@ -372,10 +372,10 @@ def unique_dict_values(
     """
     # Count occurrences of all values
     value_counts = Counter(d.values())
-    
+ 
     # Get the set of unique values (appear exactly once)
     unique_values = {value for value, count in value_counts.items() if count == 1}
-    
+ 
     # Return keys that map to these unique values
     return {key: value for key, value in d.items() if value in unique_values}
 
