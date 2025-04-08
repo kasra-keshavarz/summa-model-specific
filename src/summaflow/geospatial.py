@@ -15,6 +15,7 @@ from typing import (
     Mapping,
     Any,
     List,
+    Union,
 )
 from collections.abc import (
     Sequence,
@@ -102,6 +103,10 @@ class Stats(object):
         # `None` default value for self.threshold
         self.threshold = None
 
+        # if `frac` is included, sort the fractions
+        if any(self.data.columns.str.startswith('frac')):
+            pass # do sorting
+
         return
 
     # virtual properties
@@ -180,6 +185,55 @@ class Stats(object):
                     # If both fail, keep original
                     converted.append(item)
         return converted
+
+    @staticmethod
+    def mask_classes(
+        row: pd.Series,
+        mask_series: pd.Series
+    ) -> float:
+        """
+        Return masked values based on `mask_series` where corresponding row values are non-zero.
+
+        For each row in a DataFrame, masks the mask_series based on zero values in the row,
+        then returns the sum of the remaining mask_series values.
+
+        Parameters
+        ----------
+        row : pd.Series
+            A single row from the DataFrame to be processed. The index should align with
+            mask_series index.
+        mask_series : pd.Series
+            Series containing values to be summed after masking. Must share index with
+            the DataFrame columns.
+
+        Returns
+        -------
+        pd.Series
+            The mask_series values where the corresponding row values were non-zero.
+
+        Notes
+        -----
+        - The function is designed to be used with pandas.DataFrame.apply()
+        - Zero values in the row will mask (exclude) corresponding values in mask_series
+        - Only indices present in both the row and mask_series will be considered
+
+        Examples
+        --------
+        >>> df = pd.DataFrame({'A': [1, 0], 'B': [0, 1]})
+        >>> mask_series = pd.Series([10, 20], index=['A', 'B'])
+        >>> df.apply(mask_classes, axis=1, mask_series=mask_series)
+        0    10.0  # Only A=1 kept (10)
+        1    20.0  # Only B=1 kept (20)
+        dtype: float64
+        """
+        # Create a mask where row values are not zero
+        mask = (row != 0)
+
+        # Align the mask with mask_series (since they share the same index)
+        aligned_mask = mask[mask_series.index]
+ 
+        # Apply the mask to mask_series and sum the remaining values
+        return mask_series[aligned_mask]
 
     # special methods
     def __getitem__(
@@ -445,40 +499,100 @@ class Stats(object):
         """Adjust relevant statistics after `frac` changes"""
         # Due to removal of certain classes, we need to adjust the statistics
         # while also warning user of possible misalignment of stats
+
+        # Empty set to keep track of what stats have been updated
+        _updated_stats = {'frac'} 
+
+        # Extract _classes to calculate new `mean` values - just as a
+        # precautionary measure not to mess things up; otherwise, self.classes
+        # is available
+        _classes = Stats.__convert_list_dtype([Stats.__regex_extract_frac(c)
+                                                  for c in self['frac'].columns]) 
+        # Convert `_classes` to pandas.Series to ease multiplications
+        _classes = pd.Series(_classes, index=self['frac'].columns)
+
+        # Checking stats that needs to be updated
         if 'minority' in self.stats:
-            self.minority = self['frac'].replace(0, np.nan).idxmin(axis=1)
+            _updated_stats.add('minority')
+            _minority = self['frac'].replace(0, np.nan).idxmin(axis=1)
 
         if 'majority' in self.stats:
-            self.majority = self['frac'].replace(0, np.nan).idxmax(axis=1)
+            _updated_stats.add('majority')
+            _majority = self['frac'].replace(0, np.nan).idxmax(axis=1)
 
         if 'min' in self.stats:
+            _updated_stats.add('min')
             # Selecting the first non-zero class for the element;
             # If element does not cover any classes (frac for all is 0), then
             # report `np.nan` and a warning
             min_lambda = lambda x: x.replace(0, np.nan).dropna().index[0] \
                 if not x.replace(0, np.nan).dropna().empty else np.nan
-            self.min = self['frac'].apply(min_lambda, axis=1)
+            _min = self['frac'].apply(min_lambda, axis=1)
             # Send warning to user
             wrn_msg = ("Some elements do not cover any classes, therefore, "
                 "corresponding `min` is set to `np.nan`.")
             warnings.warn(wrn_msg)
 
         if 'max' in self.stats:
+            _updated_stats.add('max')
             # Selecting the last non-zero class for the element;
             # If element does not cover any classes (frac for all is 0), then
             # report `np.nan` and a warning
             max_lambda = lambda x: x.replace(0, np.nan).dropna().index[-1] \
                 if not x.replace(0, np.nan).dropna().empty else np.nan
-            self.max = self['frac'].apply(max_lambda, axis=1)
+            _max = self['frac'].apply(max_lambda, axis=1)
             # Send warning to user
             wrn_msg = ("Some elements do not cover any classes, therefore, "
                 "corresponding `max` is set to `np.nan`.")
             warnings.warn(wrn_msg)
 
         if 'mean' in self.stats:
-           # Calculate new `mean`
-        if 'q' in self.stats:
-           # Calculate new `q`
+            _updated_stats.add('mean')
+            # Calculate new mean values
+            _means = self['frac'].multiply(_classes).sum(axis=1)
+
+        if 'variety' in self.stats:
+            _updated_stats.add('variety')
+            # Calculate a rough count based on `frac` values
+            _variety = self['frac'].apply(Stats.mask_classes, axis=1, mask_series=_classes).apply(lambda s: s.count(), axis=1)
+            variety_lambda = lambda x: x.replace(0, np.nan).dropna().index[-1]
+            _variety = self['frac'].apply(variety_lambda, axis=1)
+            # Send warning to user
+            wrn_msg = ("Some elements do not cover any classes, therefore, "
+                "corresponding `max` is set to `np.nan`.")
+            warnings.warn(wrn_msg)
+
+        # Check stats that are dependent on `count`
+        if 'count' in self.stats:
+            _updated_stats.add('count')
+            # Calculate new `count`
+
+            if 'q' in self.stats:
+                _updated_stats.add('q')
+                pass
+
+            if 'median' in self.stats:
+                _updated_stats.add('median')
+                pass
+
+            if 'stdev' in self.stats:
+                _updated_stats.add('stdev')
+                pass
+
+            if 'coefficient_of_variation' in self.stats:
+                _updated_stats.add('coefficient_of_variation')
+                pass
+
+            if 'variance' in self.stats:
+                _updated_stats.add('variance')
+                pass
+
+        _left_out = self.stats - _updated_stats
+        _left_out -= {'frac'}
+        if _left_out:
+            # Warn users about stats that were not autoupdated
+            wrn_msg = f"The following stats were not updated: {_left_out}"
+            warnings.warn(wrn_msg)
 
         # FIXME: new stat updates to be added later.
 
