@@ -296,7 +296,7 @@ class Stats(object):
                cols.append(stat)
 
         # returning a view not a copy
-        view = self.data.loc[:, cols] 
+        view = self.data.loc[:, cols].squeeze()
 
         return view
 
@@ -372,7 +372,7 @@ class Stats(object):
     def map_fracs(
         self: Self,
         mapping: Dict[Any, Any],
-        inplace: bool = True,
+        inplace: bool = False,
         autoupdate_stats: bool = False,
     ) -> Self:
         """Implement fraction renaming, summation, and renormalization
@@ -383,7 +383,7 @@ class Stats(object):
         mapping : dict
             Mapping values from the class fractions already available to a
             target class system.
-        inplace : bool [defaults to `True`]
+        inplace : bool [defaults to `False`]
             Doing the operations on the object. If not, set to `False`.
         autoupdate_stats : bool [defaults to `False`]
             Autoupdate other statistics, if applicable, based on new `frac`
@@ -486,21 +486,76 @@ class Stats(object):
         # turn them into zeros
         df.fillna(0, inplace=True)
 
-        # Change ['frac'] values to `df`
+        # Update object's stats
         if inplace == True:
+            # note that other stats, in case of `autoupdate_stats=True` are
+            # taken care of with `self._update_stats(...)` function
             self['frac'] = df
-            return df
-        else:
-            return df
-            
+
+        # Autoupdate other stats if asked
+        if autoupdate_stats:
+            df = pd.concat(
+                        [df, self._update_stats(fracs=df, inplace=inplace)],
+                        axis=1)
+
+        # just return a copy of the caluclated adjustments
+        return df
+
     def _update_stats(
         self: Self,
+        fracs: pd.DataFrame = None,
+        inplace: bool = False,
     ) -> None:
-        """Adjust relevant statistics after `frac` changes"""
+        """Adjust relevant statistics after `frac` changes.
+        
+        This method updates various statistics (like minority, majority, min,
+        max, etc.) based on the current `frac` values. It handles cases where
+        classes may have been removed and warns about potential misalignments
+        in statistics.
+
+        Parameters
+        ----------
+        fracs : |DataFrame|
+            New `frac` database, based on which the rest of `self.stats`
+            elements are updated.
+        inplace : bool [defaults to `False`]
+            Change the stats in place.
+
+        Notes
+        -----
+        - Updates statistics that are dependent on `frac` values
+        - Handles edge cases where elements don't cover any classes (setting
+          to np.nan)
+        - Warns about statistics that couldn't be automatically updated
+        - Uses lambda functions for efficient computation of certain
+          statistics
+ 
+        Warnings
+        --------
+        - Issues warnings when:
+            * Elements don't cover any classes (min/max/variety become np.nan)
+            * Certain statistics couldn't be updated automatically
+            * Potential misalignment between statistics
+
+        Examples
+        --------
+        >>> stats_obj._update_stats()
+        ... # Updates internal statistics based on current frac values
+
+        The following statistics may be updated if present in self.stats:
+        - minority: class with smallest non-zero fraction
+        - majority: class with largest non-zero fraction
+        - min: first non-zero class
+        - max: last non-zero class
+        - mean: weighted mean of classes
+        - variety: count of non-zero classes
+        """
         # Due to removal of certain classes, we need to adjust the statistics
         # while also warning user of possible misalignment of stats
 
-        # Empty set to keep track of what stats have been updated
+        # Set to keep track of what stats have been updated
+        # Since this function may be called after changing `frac` values, the
+        # set contains it to begin with.
         _updated_stats = {'frac'} 
 
         # Extract _classes to calculate new `mean` values - just as a
@@ -511,23 +566,46 @@ class Stats(object):
         # Convert `_classes` to pandas.Series to ease multiplications
         _classes = pd.Series(_classes, index=self['frac'].columns)
 
+        # Lambdas
+        lambdas = {
+            'minority': lambda x: Stats.__regex_extract_frac(x.replace(0, np.nan).dropna().idxmin()) \
+                if not x.replace(0, np.nan).dropna().empty else np.nan,
+            'majority': lambda x: Stats.__regex_extract_frac(x.replace(0, np.nan).dropna().idxmax()) \
+                if not x.replace(0, np.nan).dropna().empty else np.nan,
+            'min': lambda x: Stats.__regex_extract_frac(x.replace(0, np.nan).dropna().index[0]) \
+                if not x.replace(0, np.nan).dropna().empty else np.nan,
+            'max': lambda x: Stats.__regex_extract_frac(x.replace(0, np.nan).dropna().index[-1]) \
+                if not x.replace(0, np.nan).dropna().empty else np.nan,
+            'variety': lambda x: x.replace(0, np.nan).dropna().count(),
+            'mean': None, # for compeleteness
+            'count': None, # FIXME: to be completed
+            'q': None, # FIXME: to be completed
+            'stdev': None, # FIXME: to be completed
+            'variance': None, # FIXME: to be completed
+            'coefficient_of_variation': None, # FIXME: to be completed
+            'median': None, # FIXME: to be completed
+        }
+
+        # If `inplace` is True
+        data = self.data.copy()
+
         # Checking stats that needs to be updated
         if 'minority' in self.stats:
             _updated_stats.add('minority')
-            _minority = self['frac'].replace(0, np.nan).idxmin(axis=1)
+            data['minority'] = fracs.apply(lambdas['minority'], axis=1)
 
         if 'majority' in self.stats:
             _updated_stats.add('majority')
-            _majority = self['frac'].replace(0, np.nan).idxmax(axis=1)
+            data['majority'] = fracs.apply(lambdas['majority'], axis=1)
 
         if 'min' in self.stats:
             _updated_stats.add('min')
+
             # Selecting the first non-zero class for the element;
             # If element does not cover any classes (frac for all is 0), then
             # report `np.nan` and a warning
-            min_lambda = lambda x: x.replace(0, np.nan).dropna().index[0] \
-                if not x.replace(0, np.nan).dropna().empty else np.nan
-            _min = self['frac'].apply(min_lambda, axis=1)
+            data['min'] = fracs.apply(lambdas['min'], axis=1)
+
             # Send warning to user
             wrn_msg = ("Some elements do not cover any classes, therefore, "
                 "corresponding `min` is set to `np.nan`.")
@@ -535,12 +613,12 @@ class Stats(object):
 
         if 'max' in self.stats:
             _updated_stats.add('max')
+
             # Selecting the last non-zero class for the element;
             # If element does not cover any classes (frac for all is 0), then
             # report `np.nan` and a warning
-            max_lambda = lambda x: x.replace(0, np.nan).dropna().index[-1] \
-                if not x.replace(0, np.nan).dropna().empty else np.nan
-            _max = self['frac'].apply(max_lambda, axis=1)
+            data['max'] = fracs.apply(lambdas['max'], axis=1)
+
             # Send warning to user
             wrn_msg = ("Some elements do not cover any classes, therefore, "
                 "corresponding `max` is set to `np.nan`.")
@@ -548,15 +626,17 @@ class Stats(object):
 
         if 'mean' in self.stats:
             _updated_stats.add('mean')
+
             # Calculate new mean values
-            _means = self['frac'].multiply(_classes).sum(axis=1)
+            data['mean'] = fracs.multiply(_classes).sum(axis=1)
 
         if 'variety' in self.stats:
             _updated_stats.add('variety')
-            # Calculate a rough count based on `frac` values
-            _variety = self['frac'].apply(Stats.mask_classes, axis=1, mask_series=_classes).apply(lambda s: s.count(), axis=1)
-            variety_lambda = lambda x: x.replace(0, np.nan).dropna().index[-1]
-            _variety = self['frac'].apply(variety_lambda, axis=1)
+
+            # Calculate `variety` based on adjusted `frac` values
+            data['variety'] = fracs.apply(lambdas['variety'], axis=1)
+            # _variety = self['frac'].apply(lambdas['variety'], axis=1) # FIXME: needs to be addressed
+
             # Send warning to user
             wrn_msg = ("Some elements do not cover any classes, therefore, "
                 "corresponding `max` is set to `np.nan`.")
@@ -564,44 +644,49 @@ class Stats(object):
 
         # Check stats that are dependent on `count`
         if 'count' in self.stats:
-            _updated_stats.add('count')
+            pass
+            # _updated_stats.add('count')
             # Calculate new `count`
 
             if 'q' in self.stats:
-                _updated_stats.add('q')
+                #_updated_stats.add('q')
                 pass
 
             if 'median' in self.stats:
-                _updated_stats.add('median')
+                #_updated_stats.add('median')
                 pass
 
             if 'stdev' in self.stats:
-                _updated_stats.add('stdev')
+                #_updated_stats.add('stdev')
                 pass
 
             if 'coefficient_of_variation' in self.stats:
-                _updated_stats.add('coefficient_of_variation')
+                #_updated_stats.add('coefficient_of_variation')
                 pass
 
             if 'variance' in self.stats:
-                _updated_stats.add('variance')
+                #_updated_stats.add('variance')
                 pass
 
         _left_out = self.stats - _updated_stats
-        _left_out -= {'frac'}
         if _left_out:
             # Warn users about stats that were not autoupdated
             wrn_msg = f"The following stats were not updated: {_left_out}"
             warnings.warn(wrn_msg)
 
-        # FIXME: new stat updates to be added later.
+            # Add left over stats
+            for stat in list(_left_out):
+                data.update(self[stat])
 
-        return
+        if inplace:
+            self.data = data
+
+        return data
 
     def set_frac_threshold(
         self: Self,
         threshold: float | int,
-        inplace: bool = True,
+        inplace: bool = False,
         autoupdate_stats: bool = False,
     ) -> pd.DataFrame:
         """Setting the `frac_threshold` value which removes those `classes`
@@ -613,10 +698,13 @@ class Stats(object):
         # Check the dtype
         if not isinstance(threshold, int | float):
             raise TypeError("`threshold` ")
+
         # Checking whether the relevant statistics exist in the first place
         if 'frac' in self.stats:
             # Setting the value
             if inplace:
+                # Just an informative variable for users; not used anywhere
+                # else
                 self.threshold = threshold
 
             # Find average fraction over all elements
@@ -630,15 +718,21 @@ class Stats(object):
                                       for c in _threshold_classes]
             _psuedo_mapping = {k: None for k in _threshold_classes}
 
-            # cal map_fracs method
-            df = self.map_fracs(_psuedo_mapping, inplace=inplace)
+            # Call map_fracs method
+            df_fracs = self.map_fracs(_psuedo_mapping, inplace=inplace)
+
+            # Autoupdate other stats if asked
+            if autoupdate_stats:
+                df_stats = self._update_stats(fracs=df_fracs, inplace=inplace)
+                df = pd.concat([df_fracs, df_stats], axis=1)
+
+            else:
+                df = df_fracs
 
             return df
 
         else:
             raise ValueError("`frac_threshold` cannot be set without `frac` stats.")
-
-        return
 
 
 class GeoLayer(Stats):
