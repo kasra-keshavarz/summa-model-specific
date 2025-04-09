@@ -16,6 +16,9 @@ from typing import (
     Dict,
     Sequence,
     Union,
+    Any,
+    Self,
+    Optional,
 )
 
 # built-in libraries
@@ -83,8 +86,8 @@ class SUMMAWorkflow(object):
         topology_attrs: Dict[str, str],
         topology_units: Dict[str, str],
         topology_to_units: Dict[str, str],
-        geospatial_data: Dict[str, Dict] = None,
-        dims: Dict[str, str] = default_dims,
+        geospatial_data: Optional[Dict[str, Dict]] = None,
+        dims: Optional[Dict[str, str]] = default_dims,
     ) -> None:
 
         """
@@ -214,6 +217,18 @@ class SUMMAWorkflow(object):
 
         # `init` object to add lazy-like behaviour
         self.init = False
+
+        # Geospatial data
+        self.geospatial_data = geospatial_data
+
+        return
+
+    # custom constructors
+    @classmethod
+    def from_maf(
+        cls,
+        layers: Dict[str, Dict] = None,
+    ) -> Self:
 
         return
 
@@ -408,8 +423,25 @@ class SUMMAWorkflow(object):
 
         # 10. `geospatial` layers
         # 10.1 `eleveation` layer
-
+        # FIXME: very rough implementation - make it better
+        self.attrs['elevation'] = xr.DataArray(
+            data=self.geospatial_data['elevation'].stats['mean'],
+            coords={
+                'hru': self.geospatial_data['elevation'].stats['mean'].index.values,
+            }
+        )
         # 10.2 `vegTypeIndex` layer
+        self.attrs['vegTypeIndex'] = xr.DataArray(
+            data=self.geospatial_data['landcover'].stats['majority'],
+            coords={
+                'hru': self.geospatial_data['landcover'].stats['majority'].index.values,
+            }
+        )
         # 10.3 `soilTypeIndex` layer
-
+        self.attrs['soilTypeIndex'] = xr.DataArray(
+            data=self.geospatial_data['soil'].stats['majority'],
+            coords={
+                'hru': self.geospatial_data['soil'].stats['majority'].index.values,
+            }
+        )
 

@@ -9,6 +9,7 @@ import os
 import re
 import warnings
 from typing import (
+    Optional,
     Dict,
     Set,
     Self,
@@ -109,9 +110,40 @@ class Stats(object):
 
         return
 
+    # custom constructors
+    @classmethod
+    def from_maf(
+        cls: Self,
+        gistool_csv: str | os.PathLike,
+    ) -> Self:
+        obj = pd.read_csv(gistool_csv, index_col=0, header=0)
+        # special occasion for qgis and MAF exists in __init__
+        # FIXME: this needs a bit more systematic approach
+        return cls(obj)
+    # alias for `from_maf` as it uses `exactextractr` under the hood
+    from_extactextractr = from_maf
+
+    @classmethod
+    def from_qgis(
+        qgis_csv: str | os.PathLike,
+    ) -> Self:
+        obj = pd.read_csv(qgis_csv, index_col=0, header=0)
+        # special occasion for qgis and MAF exists in __init__
+        return cls(obj)
+
+    @classmethod
+    def from_rasterstats(
+        rasterstats_obj,
+    ) -> Self:
+        """Constructor for rasterstats Python package objects
+        FIXME: This needs to be contributed by those who use the package
+        """
+        obj = rasterstats_obj # fix this
+        return cls(obj)
+
     # virtual properties
     @property
-    def stats(
+    def stats_info(
         self,
     ) -> List[str]:
         """Items available in the object
@@ -126,7 +158,7 @@ class Stats(object):
 
         # This can get illegible if written in a oneliner
         for s in self.data.columns:
-            # Since `frac_%` can be weird, remove all from `self.stats`,
+            # Since `frac_%` can be weird, remove all from `self.stats_info`,
             # and only put `frac` there. Same applies to `q%`.
             if s.lower().startswith('frac'):
                 item = 'frac'
@@ -149,7 +181,7 @@ class Stats(object):
     # static methods
     @staticmethod
     def __regex_extract_frac(
-        string,
+        string: str,
     ) -> int | str | float:
         """Extract values after frac_ values
 
@@ -157,15 +189,24 @@ class Stats(object):
         ----------
         string : str
            String starting with `frac_` based on the standards of this object.
+
+        Notes
+        -----
+        - Name mangling is implement to avoid confusion with subclass objects.
         """
         return re.search(r"frac_([^_]+)", string).group(1)
 
     @staticmethod
     def __convert_list_dtype(
-        ls,
+        ls: List[Any],
     ) -> List[int | float | str]:
         """Converts str elements of a list to int or float dtypes, if
-        feasible"""
+        feasible
+
+        Notes
+        -----
+        - Name mangling is implement to avoid confusion with subclass objects.
+        """
         # Just for reassurance
         ls = list(ls)
 
@@ -216,6 +257,7 @@ class Stats(object):
         - The function is designed to be used with pandas.DataFrame.apply()
         - Zero values in the row will mask (exclude) corresponding values in mask_series
         - Only indices present in both the row and mask_series will be considered
+        - Name mangling is implement to avoid confusion with subclass objects.
 
         Examples
         --------
@@ -267,6 +309,10 @@ class Stats(object):
         # If not a string or Sequence, raise a TypeError
         if not isinstance(item, Sequence | str):
             raise TypeError('Item(s) must be a string or a Sequence of strings.')
+
+        # If more than one argument is entered, throw an IndexError
+        if isinstance(item, tuple) and len(item) > 1:
+            raise IndexError("Too many indices provided.")
  
         # Aliases for `frac` and `q`
         # For users with less knowledge of the whole thing
@@ -281,9 +327,9 @@ class Stats(object):
                 # remove aliases if asked by the user
                 items -= set(alias_options)
 
-        # If `item` not in `self.stats` raise IndexError
+        # If `item` not in `self.stats_info` raise IndexError
         for stat in items:
-            if stat not in self.stats:
+            if stat not in self.stats_info:
                 raise IndexError(f'`{stat}` cannot be indexed.')
 
         # Check the input item and see if it is available
@@ -317,9 +363,9 @@ class Stats(object):
         -----
         - 
         """
-        # if `stat` is in `self.stats` remove them, if not available proceed
+        # if `stat` is in `self.stats_info` remove them, if not available proceed
         # with inserting
-        if stat in self.stats:
+        if stat in self.stats_info:
             # define relevant columns to be removed
             cols = self[stat].columns
             # drop the relevant columns
@@ -334,46 +380,15 @@ class Stats(object):
         self: Self,
     ) -> pd.DataFrame:
         """Official representation of the object"""
-        number_of_stats = len(self.stats)
-        return f"{number_of_stats} statistics provided"
-
-    # custom constructors
-    @classmethod
-    def from_maf(
-        cls: Self,
-        gistool_csv: str | os.PathLike,
-    ) -> Self:
-        obj = pd.read_csv(gistool_csv, index_col=0, header=0)
-        # special occasion for qgis and MAF exists in __init__
-        # FIXME: this needs a bit more systematic approach
-        return cls(obj)
-    # alias for `from_maf` as it uses `exactextractr` under the hood
-    from_extactextractr = from_maf
-
-    @classmethod
-    def from_qgis(
-        qgis_csv: str | os.PathLike,
-    ) -> Self:
-        obj = pd.read_csv(qgis_csv, index_col=0, header=0)
-        # special occasion for qgis and MAF exists in __init__
-        return cls(obj)
-
-    @classmethod
-    def from_rasterstats(
-        rasterstats_obj,
-    ) -> Self:
-        """Constructor for rasterstats Python package objects
-        FIXME: This needs to be contributed by those who use the package
-        """
-        obj = rasterstats_obj # fix this
-        return cls(obj)
+        number_of_stats = len(self.stats_info)
+        return f"{number_of_stats} statistic(s) provided"
 
     # core functions
     def map_fracs(
         self: Self,
         mapping: Dict[Any, Any],
-        inplace: bool = False,
-        autoupdate_stats: bool = False,
+        inplace: Optional[bool] = False,
+        autoupdate_stats: Optional[bool] = False,
     ) -> Self:
         """Implement fraction renaming, summation, and renormalization
         of values, based on `mapping`
@@ -409,7 +424,7 @@ class Stats(object):
             raise TypeError("`mapping` must be of type dict.")
 
         # For mapping operations, `frac` stat is necessary
-        if 'frac' not in self.stats:
+        if 'frac' not in self.stats_info:
             raise ValueError("`frac` values are necessary for mappping operations.")
 
         # Based on `mapping`, find the classes that should be renamed,
@@ -503,8 +518,8 @@ class Stats(object):
 
     def _update_stats(
         self: Self,
-        fracs: pd.DataFrame = None,
-        inplace: bool = False,
+        fracs: pd.DataFrame,
+        inplace: Optional[bool] = False,
     ) -> None:
         """Adjust relevant statistics after `frac` changes.
         
@@ -516,7 +531,7 @@ class Stats(object):
         Parameters
         ----------
         fracs : |DataFrame|
-            New `frac` database, based on which the rest of `self.stats`
+            New `frac` database, based on which the rest of `self.stats_info`
             elements are updated.
         inplace : bool [defaults to `False`]
             Change the stats in place.
@@ -542,7 +557,7 @@ class Stats(object):
         >>> stats_obj._update_stats()
         ... # Updates internal statistics based on current frac values
 
-        The following statistics may be updated if present in self.stats:
+        The following statistics may be updated if present in self.stats_info:
         - minority: class with smallest non-zero fraction
         - majority: class with largest non-zero fraction
         - min: first non-zero class
@@ -590,15 +605,15 @@ class Stats(object):
         data = self.data.copy()
 
         # Checking stats that needs to be updated
-        if 'minority' in self.stats:
+        if 'minority' in self.stats_info:
             _updated_stats.add('minority')
             data['minority'] = fracs.apply(lambdas['minority'], axis=1)
 
-        if 'majority' in self.stats:
+        if 'majority' in self.stats_info:
             _updated_stats.add('majority')
             data['majority'] = fracs.apply(lambdas['majority'], axis=1)
 
-        if 'min' in self.stats:
+        if 'min' in self.stats_info:
             _updated_stats.add('min')
 
             # Selecting the first non-zero class for the element;
@@ -611,7 +626,7 @@ class Stats(object):
                 "corresponding `min` is set to `np.nan`.")
             warnings.warn(wrn_msg)
 
-        if 'max' in self.stats:
+        if 'max' in self.stats_info:
             _updated_stats.add('max')
 
             # Selecting the last non-zero class for the element;
@@ -624,13 +639,13 @@ class Stats(object):
                 "corresponding `max` is set to `np.nan`.")
             warnings.warn(wrn_msg)
 
-        if 'mean' in self.stats:
+        if 'mean' in self.stats_info:
             _updated_stats.add('mean')
 
             # Calculate new mean values
             data['mean'] = fracs.multiply(_classes).sum(axis=1)
 
-        if 'variety' in self.stats:
+        if 'variety' in self.stats_info:
             _updated_stats.add('variety')
 
             # Calculate `variety` based on adjusted `frac` values
@@ -643,32 +658,32 @@ class Stats(object):
             warnings.warn(wrn_msg)
 
         # Check stats that are dependent on `count`
-        if 'count' in self.stats:
+        if 'count' in self.stats_info:
             pass
             # _updated_stats.add('count')
             # Calculate new `count`
 
-            if 'q' in self.stats:
+            if 'q' in self.stats_info:
                 #_updated_stats.add('q')
                 pass
 
-            if 'median' in self.stats:
+            if 'median' in self.stats_info:
                 #_updated_stats.add('median')
                 pass
 
-            if 'stdev' in self.stats:
+            if 'stdev' in self.stats_info:
                 #_updated_stats.add('stdev')
                 pass
 
-            if 'coefficient_of_variation' in self.stats:
+            if 'coefficient_of_variation' in self.stats_info:
                 #_updated_stats.add('coefficient_of_variation')
                 pass
 
-            if 'variance' in self.stats:
+            if 'variance' in self.stats_info:
                 #_updated_stats.add('variance')
                 pass
 
-        _left_out = self.stats - _updated_stats
+        _left_out = self.stats_info - _updated_stats
         if _left_out:
             # Warn users about stats that were not autoupdated
             wrn_msg = f"The following stats were not updated: {_left_out}"
@@ -686,8 +701,8 @@ class Stats(object):
     def set_frac_threshold(
         self: Self,
         threshold: float | int,
-        inplace: bool = False,
-        autoupdate_stats: bool = False,
+        inplace: Optional[bool] = False,
+        autoupdate_stats: Optional[bool] = False,
     ) -> pd.DataFrame:
         """Setting the `frac_threshold` value which removes those `classes`
         having fractions less than `threshold` on average over all elements.
@@ -700,7 +715,7 @@ class Stats(object):
             raise TypeError("`threshold` ")
 
         # Checking whether the relevant statistics exist in the first place
-        if 'frac' in self.stats:
+        if 'frac' in self.stats_info:
             # Setting the value
             if inplace:
                 # Just an informative variable for users; not used anywhere
@@ -735,7 +750,7 @@ class Stats(object):
             raise ValueError("`frac_threshold` cannot be set without `frac` stats.")
 
 
-class GeoLayer(Stats):
+class GeoLayer(object):
     """GeoLayer defining geospatial data as a subclass of Stats
 
     Attributes
@@ -746,10 +761,10 @@ class GeoLayer(Stats):
     """
     def __init__(
         self: Self,
-        stats: Dict[str, Dict[str, Any]],
-        layer: np.ndarray = None,
-        geom: gpd.GeoDataFrame = None,
-        engine: str = 'gdal',
+        stats: Stats,
+        layer: Optional[np.ndarray] = None,
+        geom: Optional[gpd.GeoDataFrame] = None,
+        engine: Optional[str] = 'gdal',
     ) -> None:
         """Main constructor for GeoSpatial layers
 
@@ -760,37 +775,68 @@ class GeoLayer(Stats):
         geom : |GeoDataFrame|
             A GeoDataFrame representing elements for which 
         """
-        super().__init__(
-            stats=stats
-        )
-        # Type of engine must be `str`
-        if not isinstance(engine, str):
-            raise ValueError("`engine` must have a dtype of `str`.")
+        # If `stats` is already of dtype `Stats` ignore building it;
+        # This usually happens when one of the alternative constructors are
+        # used.
+
+        # stats attribute that refers to the superclass's Stats object
+        self.stats = stats
 
         # Assign attributes if provided
-        if layer:
+        if layer is not None:
             self.layer = layer
-        if geom:
+        if geom is not None:
             self.geom = geom
 
         return
 
+    # class methods
+    @classmethod
+    def from_maf(
+        cls: Self,
+        maf_stats: str | os.PathLike,
+        maf_layer: Optional[str | os.PathLike] = None,
+        maf_geolayer: Optional[str | os.PathLike] = None,
+    ) -> Self:
+        """MAF-sepcific layer for internal users' convenience.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        GeoLayer
+            A GeoLayer object based on MAF's outputs.
+        """
+        # Provide necessary values for superclass's `from_maf` constructor
+        _stats_obj = Stats.from_maf(gistool_csv=maf_stats)
+
+        # Populate `layer` and `geom` entities if provided (not `None`)
+        return cls(stats=_stats_obj, layer=maf_layer, geom=maf_geolayer)
+
     # special methods
     def __repr__(
-        self
+        self: Self,
     ) -> str:
         """Official representation of the object
         """
         # Show the stats provided
-        stats_provided = list(self.stats.keys())
+        stats_provided = self.stats.stats_info
         # Show the layer value
-        layer_provided = 'True' if self.layer else 'False'
+        layer_provided = True if self.layer else False
+        # Show the geom value
+        geom_provided = True if self.geom else False
 
-        # reprs
+        # __repr__ elements
         stats_repr = f"Stats: {stats_provided}"
+        layer_repr = f"Layer: {layer_provided}"
+        geom_repr = f"Geometry: {geom_provided}"
+
+        # Main __repr__ string
+        main_repr = stats_repr + "\n" + layer_repr + "\n" + geom_repr
 
         # return the string representation of the layer
-        return stats_repr + '\n' + layer_repr
+        return main_repr
 
     # plotting the `self.layer` object
     def plot(
