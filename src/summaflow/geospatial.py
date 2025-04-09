@@ -763,14 +763,15 @@ class GeoLayer(Stats):
         super().__init__(
             stats=stats
         )
-        # type of engine must be `str`
+        # Type of engine must be `str`
         if not isinstance(engine, str):
             raise ValueError("`engine` must have a dtype of `str`.")
 
-        # assign attributes if provided
+        # Assign attributes if provided
         if layer:
-            if engine.lower() == 'gdal':
-                self.layer = layer
+            self.layer = layer
+        if geom:
+            self.geom = geom
 
         return
 
@@ -787,7 +788,6 @@ class GeoLayer(Stats):
 
         # reprs
         stats_repr = f"Stats: {stats_provided}"
-        layer_repr = f"Layer: {layer_provided}"
 
         # return the string representation of the layer
         return stats_repr + '\n' + layer_repr

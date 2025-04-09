@@ -194,7 +194,7 @@ class SUMMAWorkflow(object):
         except:
             self.riv = None
 
-        # `cat` will be added as a @property
+        # `cat` will be added as a virtual property
         try:
             # `gru` can also be called `cat`
             self.gru = topology_data.get('cat')
@@ -217,7 +217,7 @@ class SUMMAWorkflow(object):
 
         return
 
-
+    # virtual properties
     @property
     def cat(
         self,
@@ -225,7 +225,57 @@ class SUMMAWorkflow(object):
         """aka `gru`"""
         return self.gru
 
+    # special methods
+    def __repr__(
+        self,
+    ) -> str:
+        """Official string representation
+        
+        FIXME: Needs improvement, for now a sandbox style
+        """
+        # FIXME: In an ideal world, `self.topology` should be defined
+        #        as an object and populated across models. In this
+        #        work, we will only focus on main object.
+        # forcing information
+        forcing_str = f"Forcing files: {self._forcing}"
 
+        # FIXME: In an ideal world, `self.topology` should be defined
+        #        as an object and populated. In this work, we will
+        #        only focus on main object. Previous assumption was that
+        #        `hydrant` can provide such an object.
+        # topology information
+        # if single site setup is desired, `riv` object
+        # will not be necessary; if present, show the number of
+        # elements as part of the __repr__
+        if self.riv is not None:
+            riv_count = len(self.riv)
+            riv_str = f"Rivers: {riv_count} "
+        else:
+            riv_str = f"Rivers: no river network"
+        # consider the numbers of `topology['cat']` and
+        # `topology['hru']` elements as their __repr__
+        cat_count = len(self.cat)
+        hru_count = len(self.hru)
+        # build strings
+        cat_str = f"GRUs: {cat_count}"
+        hru_str = f"HRUs: {hru_count}"
+        topology_str = cat_str + '\n' + hru_str + '\n' + riv_str
+
+        # object's status
+        status = f"Initialized: {self.init}"
+
+        # final string representation is a summary of
+        # forcing and topology
+        repr_str = forcing_str + '\n' + topology_str + '\n' + status
+
+        return repr_str
+
+    # static methods
+    # FIXME: All small attribute functions need to turn into a static method
+    #        for users' convenience.
+    # @staticmethod
+
+    # object methods
     def init_attrs(
         self,
     ) -> None:
@@ -361,50 +411,5 @@ class SUMMAWorkflow(object):
 
         # 10.2 `vegTypeIndex` layer
         # 10.3 `soilTypeIndex` layer
-
-
-    def __repr__(
-        self,
-    ) -> str:
-        """Official string representation
-        
-        FIXME: Needs improvement, for now a sandbox style
-        """
-        # FIXME: In an ideal world, `self.topology` should be defined
-        #        as an object and populated across models. In this
-        #        work, we will only focus on main object.
-        # forcing information
-        forcing_str = f"Forcing files: {self._forcing}"
-
-        # FIXME: In an ideal world, `self.topology` should be defined
-        #        as an object and populated. In this work, we will
-        #        only focus on main object. Previous assumption was that
-        #        `hydrant` can provide such an object.
-        # topology information
-        # if single site setup is desired, `riv` object
-        # will not be necessary; if present, show the number of
-        # elements as part of the __repr__
-        if self.riv is not None:
-            riv_count = len(self.riv)
-            riv_str = f"Rivers: {riv_count} "
-        else:
-            riv_str = f"Rivers: no river network"
-        # consider the numbers of `topology['cat']` and
-        # `topology['hru']` elements as their __repr__
-        cat_count = len(self.cat)
-        hru_count = len(self.hru)
-        # build strings
-        cat_str = f"GRUs: {cat_count}"
-        hru_str = f"HRUs: {hru_count}"
-        topology_str = cat_str + '\n' + hru_str + '\n' + riv_str
-
-        # object's status
-        status = f"Initialized: {self.init}"
-
-        # final string representation is a summary of
-        # forcing and topology
-        repr_str = forcing_str + '\n' + topology_str + '\n' + status
-
-        return repr_str
 
 
