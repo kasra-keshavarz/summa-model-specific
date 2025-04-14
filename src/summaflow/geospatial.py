@@ -4,6 +4,9 @@ import pandas as pd
 import numpy as np
 import geopandas as gpd
 
+import pint
+import pint_pandas
+
 # built-in libraries
 import os
 import re
@@ -23,13 +26,60 @@ from collections.abc import (
 )
 from collections import (
     Counter,
+    OrderedDict,
 )
 
 # import internal functions
 from . import utils
 
 # constant values and functions
+## pandas.DataFrame index slicer
 idx = pd.IndexSlice
+## NoneType is only defined on Python@3.10+
+NoneType = type(None)
+## List of acceptable statistics for the objects defined
+ACCEPTABLE_STATS = {
+    'min',
+    'max',
+    'mean',
+    'majority',
+    'minority',
+    'median',
+    'quantile',
+    'variety',
+    'variance',
+    'stdev',
+    'coefficient_of_variation',
+    'frac',
+    'coords',
+    'count',
+    'sum',
+}
+## List of acceptable statistics accepting units
+STATS_WITH_UNITS = {
+    'min',
+    'max',
+    'mean',
+    'majority',
+    'minority',
+    'median',
+    'quantile',
+    'sum',
+    'coords',
+}
+## List of acceptable statistics with squared units
+STATS_WITH_SQUARED_UNITS = {
+    'variance',
+}
+## List of acceptable statistics that are dimensionless
+STATS_DIMENSIONLESS = {
+    'stdev',
+    'frac',
+    'count',
+    'coefficient_of_variation',
+    'count',
+}
+STATS_WITHOUT_UNITS = STATS_DIMENSIONLESS
 
 
 class Stats(object):
@@ -765,6 +815,7 @@ class GeoLayer(object):
         layer: Optional[np.ndarray] = None,
         geom: Optional[gpd.GeoDataFrame] = None,
         engine: Optional[str] = 'gdal',
+        unit: Optional[str] = None,
     ) -> None:
         """Main constructor for GeoSpatial layers
 
@@ -773,7 +824,15 @@ class GeoLayer(object):
         layer : array-like
             An array-like object representing raster layer of interest
         geom : |GeoDataFrame|
-            A GeoDataFrame representing elements for which 
+            A GeoDataFrame representing elements for which stats are
+            caluclated
+        engine : str
+
+        unit : str or None
+
+        Notes
+        -----
+        - for dimensionless layers, use 'dimensionless' as unit, not None
         """
         # If `stats` is already of dtype `Stats` ignore building it;
         # This usually happens when one of the alternative constructors are
@@ -788,6 +847,21 @@ class GeoLayer(object):
         if geom is not None:
             self.geom = geom
 
+        # GeoLayer engine for reading Geospatial files
+        self._engine = engine
+
+        # Pint unit registry
+        self._ureg = pint.UnitRegistry()
+
+        # if unit is `None`, warn users that this does not covert units
+        if unit == None:
+            warnings.warn("No unit conversion is taking place. See "
+            "`.to_unit(...)` for such operation")
+
+        # If nothing is given,
+        # Assign first instance unit
+        self._unit = self._ureg(unit).units
+
         return
 
     # class methods
@@ -797,6 +871,8 @@ class GeoLayer(object):
         maf_stats: str | os.PathLike,
         maf_layer: Optional[str | os.PathLike] = None,
         maf_geolayer: Optional[str | os.PathLike] = None,
+        *args,
+        **kwargs,
     ) -> Self:
         """MAF-sepcific layer for internal users' convenience.
 
@@ -812,7 +888,12 @@ class GeoLayer(object):
         _stats_obj = Stats.from_maf(gistool_csv=maf_stats)
 
         # Populate `layer` and `geom` entities if provided (not `None`)
-        return cls(stats=_stats_obj, layer=maf_layer, geom=maf_geolayer)
+        return cls(
+            stats=_stats_obj,
+            layer=maf_layer,
+            geom=maf_geolayer,
+            *args,
+            **kwargs)
 
     # special methods
     def __repr__(
@@ -820,25 +901,117 @@ class GeoLayer(object):
     ) -> str:
         """Official representation of the object
         """
-        # Show the stats provided
-        stats_provided = self.stats.stats_info
-        # Show the layer value
-        layer_provided = True if self.layer else False
-        # Show the geom value
-        geom_provided = True if self.geom else False
-
-        # __repr__ elements
-        stats_repr = f"Stats: {stats_provided}"
-        layer_repr = f"Layer: {layer_provided}"
-        geom_repr = f"Geometry: {geom_provided}"
+        # __repr__ elements in an ordered dictionary for representation
+        repr_dict = OrderedDict(
+            stats_repr = f"Stats: {self.stats.stats_info}",
+            layer_repr = f"Layer: {True if self.layer else False}",
+            geom_repr = f"Geometry: {True if self.geom else False}",
+            unit_repr = f"Geolayer Unit: {self._unit}",
+        )
 
         # Main __repr__ string
-        main_repr = stats_repr + "\n" + layer_repr + "\n" + geom_repr
+        main_repr = "\n".join(repr_dict.values())
 
         # return the string representation of the layer
         return main_repr
 
-    # plotting the `self.layer` object
+    # static methods
+    @staticmethod
+    def assign_unit(
+        series: pd.Series,
+        unit: str | pint.Unit,
+    ) -> pint_pandas.PintArray:
+        """Apply a Pint unit to a |Series|"""
+        # type check
+        if not isinstance(unit, str | pint.Unit):
+            raise TypeError("`unit` must be of type string or `pint.Unit`.")
+        if not isinstance(series, pd.Series):
+            raise TypeError("`col` must be of type pandas.Series")
+
+        # If everything is OK
+        series_unit = pint_pandas.PintArray(series, dtype=f"pint[{unit}]")
+
+        return series_unit
+
+    @staticmethod
+    def convert_unit(
+        series: pd.Series,
+        target_unit: str,
+    ) -> pd.Series:
+        """Convert a |Series| unit to the `target_unit`."""
+        # Routine checks
+        if not isinstance(target_unit, str | pint.Unit):
+            raise TypeError("`target_unit` must be of type string or `pint.Unit`.")
+        if not isinstance(series, pd.Series):
+            raise TypeError("`series` must be of type pandas.Series.")
+        if not hasattr(series, 'pint'):
+            raise ValueError("`series` must have a `pint` attribute (has a pint.Unit datatype).")
+
+        # If everything is OK
+        return series.pint.to(target_unit)
+        
+    @staticmethod
+    def remove_unit(
+        series: pd.Series,
+    ) -> pd.Series:
+        """Remove a pandas.Series unit value"""
+        if not hasattr(series, 'pint'):
+            raise ValueError("`series` must have a `pint` attribute (has a pint.Unit datatype).")
+
+        return series.pint.magnitude
+
+    # virtual properties (including getter and setter functions)
+    @property
+    def unit(
+        self: Self,
+    ) -> pint.Unit:
+        """GeoLayer's Pint unit"""
+        # report unit of the layer 
+        return self._unit
+
+    @unit.setter
+    def unit(
+        self: Self,
+        unit_value: str,
+    ) -> None:
+        """Setter function for .unit property"""
+        # If unit_value is not string, throw a ValueError exception
+        if not isinstance(unit_value, str):
+            raise TypeError("`unit` must be a string value.")
+
+        # If a unit is already assigned, you gotta make sure conversion takes
+        # place
+
+        # turn into a Pint.Unit object
+        self._unit = self._ureg(unit_value).units
+
+        return
+
+    @property
+    def engine(
+        self: Self,
+    ) -> str:
+        """Instance's `engine` property getter function"""
+
+        return self._engine
+
+    @engine.setter
+    def engine(
+        self: Self,
+        _engine: str
+    ) -> None:
+        """Instance's `engine` property setter function"""
+        if not isinstance(_engine, str):
+            raise TypeError("`engine` must be a string value.")
+
+        if _engine not in (""):
+            raise ValueError("`engine` must be either `gdal` or `rasterio`.")
+
+        self._engine = _engine
+
+        return
+
+    # Object's methods
     def plot(
         self: Self,
         engine: str = 'matplotlib',
@@ -847,7 +1020,7 @@ class GeoLayer(object):
         try:
            import matplotlib.pyplot as plt
         except ImportError:
-           raise ImportError("To plot GeoLayer object, you need to install matplotlib>=3.1")
+           raise ImportError("To plot GeoLayer, install matplotlib>=3.1")
 
         if self.engine.lower() in ('gdal'):
             plt.imshow(self.layer)
@@ -855,4 +1028,76 @@ class GeoLayer(object):
                 plt.show()
             except:
                 raise ValueError("Cannot plot in non-interactive environment")
+
+    def to_unit(
+        self: Self,
+        target_unit: str | NoneType,
+        inplace: bool = True,
+    ) -> None:
+        """Tranfer GeoLayer's information to the new unit
+
+        Parameters
+        ----------
+        target_unit : str
+            To target unit to which the GeoLayer's information will be
+            converted.
+        inplace : bool [defaults to `True`]
+            Changing values in place, if set to True, otherwise, return a copy
+            of changes implemented.
+
+        Notes
+        -----
+        - This modifies `unit` attribute in place.
+        - Unit conversion logic is up to the end user.
+        """
+        if not isinstance(target_unit, str | NoneType | pint.Unit):
+            raise TypeError("`unit` must be of type str, `None` "
+            "(dimensionless), or `pint.Unit`.")
+
+        # Change the stats values based on the new unit
+        if self.stats:
+            # Investigate the available stats and follow hard-coded rules for
+            # each; This information needs to be hard-coded as computers do
+            # not hold statistical knowledge; build unit mapping dictionary:
+            unit_mapping = {}
+            _temp_data = pd.DataFrame()
+
+            # For each statistics, build the unit lambda function
+            for stat in self.stats.stats_info:
+                if stat in STATS_WITH_UNITS:
+                    unit_mapping[stat] = lambda x: x
+                if stat in STATS_WITHOUT_UNITS:
+                    unit_mapping[stat] = lambda x: None
+                if stat in STATS_WITH_SQUARED_UNITS:
+                    unit_mapping[stat] = lambda x: x**2
+
+                # Extract stats value for unit operations
+                df = self.stats[stat].copy()
+
+                # `stat.data` value
+                if isinstance(df, pd.Series):
+                    df = df.to_frame()
+                elif isinstance(self.stats[stat], pd.DataFrame):
+                    pass
+                else:
+                    raise TypeError("Stats type unacceptable.")
+
+                # Assign units
+                temp_df = df.apply(lambda col: GeoLayer.assign_unit(col, unit_mapping[col.name](self.unit)))
+                # Implement unit conversion
+                temp_df = temp_df.apply(lambda col: GeoLayer.convert_unit(col, unit_mapping[col.name](target_unit)))
+                # Remove unit values
+                temp_df = temp_df.apply(GeoLayer.remove_unit)
+
+                # Add to _temp_data
+                _temp_data = pd.concat([_temp_data, temp_df], axis=1)
+
+        # Change the `stats.data` value
+        if inplace:
+            self.stats.data = _temp_data
+        
+        # Change the self.unit attribute
+        self.unit = target_unit
+
+        return _temp_data
 

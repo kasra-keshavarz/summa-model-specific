@@ -79,13 +79,13 @@ class SUMMAWorkflow(object):
         self,
         forcing_data: Sequence[str | os.PathLike],
         forcing_attrs: Dict[str, str],
-        forcing_vars: Dict[str, str],
-        forcing_units: Dict[str, str],
-        forcing_to_units: Dict[str, str],
+        forcing_name_mapping: Dict[str, str],
+        forcing_unit_mapping: Dict[str, str],
+        forcing_to_unit_mapping: Dict[str, str],
         topology_data: Dict[str, str | int],
         topology_attrs: Dict[str, str],
-        topology_units: Dict[str, str],
-        topology_to_units: Dict[str, str],
+        topology_unit_mapping: Dict[str, str],
+        topology_to_unit_mapping: Dict[str, str],
         geospatial_data: Optional[Dict[str, Dict]] = None,
         dims: Optional[Dict[str, str]] = default_dims,
     ) -> None:
@@ -184,10 +184,10 @@ class SUMMAWorkflow(object):
         #        sake of timing of this deliverable, we compromise and treat
         #        them as different variables starting with `forcing_`.
         self._forcing = forcing_data
-        self.forcing_vars = forcing_vars
+        self.forcing_vars = forcing_name_mapping
         self._forcing_attrs = forcing_attrs
-        self.forcing_units = forcing_units
-        self.forcing_to_units = forcing_to_units
+        self.forcing_units = forcing_unit_mapping
+        self.forcing_to_units = forcing_to_unit_mapping
  
         # topology data
         # `riv` is optional, as single-site configurations, do not have
@@ -209,8 +209,8 @@ class SUMMAWorkflow(object):
 
         # `topology_*` object
         self.topology_attrs = topology_attrs
-        self.topology_units = topology_units
-        self.topology_to_units = topology_to_units
+        self.topology_units = topology_unit_mapping
+        self.topology_to_units = topology_to_unit_mapping
 
         # dimension names
         self.dims = dims
@@ -285,11 +285,6 @@ class SUMMAWorkflow(object):
 
         return repr_str
 
-    # static methods
-    # FIXME: All small attribute functions need to turn into a static method
-    #        for users' convenience.
-    # @staticmethod
-
     # object methods
     def init_attrs(
         self,
@@ -326,33 +321,45 @@ class SUMMAWorkflow(object):
         # instantiation; This class variable is a combination of
         # information of `forcing_*` and `topology_*` objects
         #
-        # 1. measurement height value through self.forcing_attrs;
-        #    the name for `mHeight` itself is taken from
-        #    `forcing_vars['measurement_height']`. This value is defaulted to
-        #    `mHeight` in the workflow, if it is not provided.
+        # 1. measurement height value through self.forcing_attrs
         # Notes:
         #    1. The `measurement_height` is the assumption of this workflow
         #    that is clearly instructed in the tutorial and API reference.
         #    2. `mHeight` is defined for each `hru` in SUMMA, therefore,
         #       hard-coded here.
-        mHeight_name = self.forcing_vars.get('measurement_height')
-        mHeight_values = [self._forcing_attrs.get('measurement_height')] * len(self.gru)
-        self.attrs[mHeight_name] = xr.DataArray(mHeight_values, dims=self.dims['hru'])
+        _mheight_name = 'mHeight'
+        self.attrs[_mheight_name] = SUMMAWorkflow._mheight(
+                                       forcing_attrs=self._forcing_attrs,
+                                       elements=self.hru,
+                                       element_name=self.dims['hru'],
+                                       height_name='measurement_height',
+                                       height_unit='measurement_height_unit')
 
         # 2. `slopeTypeIndex` which is "a legacy that is no longer used"
         #     reference: github.com/CH-Earth/CWARHM: step 5/SUMMA/1/1
         # Note:
         #     If needed, the hard-coded names & values here can be transformed
         #     to be read from the input objects.
-        slope_type_index_values = [int(1)] * len(self.gru)
-        self.attrs['slopeTypeIndex'] = xr.DataArray(slope_type_index_values, dims=self.dims['hru'])
+        _slope_type_index_name = 'slopeTypeIndex'
+        self.attrs[_slope_type_index_name] = SUMMAWorkflow._slope_type_index(
+                                                 slope_value=int(1),
+                                                 elements=self.hru,
+                                                 element_name=self.dims['hru'])
 
         # 3. `hruId` and `gruId` values
         # Note:
         #     If needed, the hard-coded names here can be transformed to be read
         #     from the input objects.
-        self.attrs['gruId'] = xr.DataArray(self.gru['COMID'], coords={'gru': self.gru[gru_fid]})
-        self.attrs['hruId'] = xr.DataArray(self.hru['COMID'], coords={'hru': self.hru[hru_fid]})
+        self.attrs['gruId'] = SUMMAWorkflow._elements(
+                                  self.gru,
+                                  self.topology_attrs['gru_fid'],
+                                  'gru',
+                                  self.gru[gru_fid])
+        self.attrs['hruId'] = SUMMAWorkflow._elements(
+                                  self.hru,
+                                  self.topology_attrs['hru_fid'],
+                                  'hru',
+                                  self.hru[hru_fid])
 
         # 4. `hru2gruId` values
         # Note:
@@ -428,20 +435,123 @@ class SUMMAWorkflow(object):
             data=self.geospatial_data['elevation'].stats['mean'],
             coords={
                 'hru': self.geospatial_data['elevation'].stats['mean'].index.values,
-            }
+            },
+            attrs={'unit': self.geospatial_data['elevation'].unit}
         )
         # 10.2 `vegTypeIndex` layer
         self.attrs['vegTypeIndex'] = xr.DataArray(
             data=self.geospatial_data['landcover'].stats['majority'],
             coords={
                 'hru': self.geospatial_data['landcover'].stats['majority'].index.values,
-            }
+            },
+            attrs={'unit': self.geospatial_data['landcover'].unit}
         )
         # 10.3 `soilTypeIndex` layer
+        # FIXME: This is also doable through the trialParams.nc file
         self.attrs['soilTypeIndex'] = xr.DataArray(
             data=self.geospatial_data['soil'].stats['majority'],
             coords={
                 'hru': self.geospatial_data['soil'].stats['majority'].index.values,
-            }
+            },
+            attrs={'unit': self.geospatial_data['soil'].unit}
         )
 
+        return
+
+    # static methods
+    # mHeight func
+    @staticmethod
+    def _mheight(
+        forcing_attrs: Dict[str, str],
+        elements: Sequence[str | float | int],
+        element_name: str = 'hruId',
+        height_name: str = 'measurement_height',
+        height_unit: str = 'measurement_height_unit',
+    ) -> xr.DataArray:
+        """Returning SUMMA-specific *mHeight* variable based on [1].
+
+        Parameters
+        ----------
+        forcing_attrs : Dict[str, str]
+            A Dictionary describing necessary attribute of forcing variables.
+        elements : Sequence of str, float, or int
+            A seuqence of GRU values.
+        element_name : str
+            Name of the `elements` being used as the dimension of returned 
+            DataArray.
+        height_name : str
+            Variable defining measurement height value in `forcing_attrs` keys.
+
+        References
+        ----------
+        .. [1] https://summa.readthedocs.io/en/latest/input_output/SUMMA_input/#local-attributes-file
+        """
+        if not isinstance(forcing_attrs, dict):
+            raise TypeError("`forcing_attrs` must be a dictionary of string values.")
+
+        mHeight_name = forcing_attrs.get(height_name)
+        mHeight_values = [forcing_attrs.get(height_name)] * len(elements)
+        attrs = {'unit': forcing_attrs.get(height_unit)}
+
+        return xr.DataArray(mHeight_values, dims=element_name, attrs=attrs)
+
+    @staticmethod
+    def _slope_type_index(
+        slope_value : int,
+        elements : Sequence[int | str | float],
+        element_name : str = 'hruId',
+    ) -> xr.DataArray:
+        """Returning SUMMA-specific *slopeTypeIndex* variable based on [1].
+        Based on [1], this value is a legacy variable and can be set to an
+        integer value of 1 and repeated for all computational elements.
+
+        Parameters
+        ----------
+        slope_value : Dict[str, str]
+            A Dictionary describing necessary attribute of forcing variables.
+        elements : Sequence of str, float, or int
+            A seuqence of HRU/GRU values.
+        element_name : str
+            Name of the `elements` being used as the dimension of returned 
+            DataArray.
+
+        References
+        ----------
+        .. [1] https://summa.readthedocs.io/en/latest/input_output/SUMMA_input/#local-attributes-file
+        """
+        if not isinstance(slope_value, int | float):
+            raise TypeError("`slope_value` must be an integer or a float")
+        slope_type_index_values = [int(slope_value)] * len(elements)
+
+        return xr.DataArray(slope_type_index_values, dims=element_name)
+
+    @staticmethod
+    def _elements(
+        geom: gpd.GeoDataFrame,
+        fid: str,
+        dim_name: str,
+        dim_value: str,
+    ) -> xr.DataArray:
+        """Return element values in from of a |DataArray|
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        """
+        if not isinstance(geom, gpd.GeoDataFrame):
+            raise ValueError("`geom` must be a geopandas.GeoDataFrame.")
+
+        return xr.DataArray(geom[fid], coords={dim_name: dim_value})
+
+
+    # slopeTypeIndex
+    # gruId
+    # hruId
+    # hru2gruId
+    # centroid
+    # HRUarea
+    # elevation
+    # soilTypeIndex
+    # vegTypeIndex
