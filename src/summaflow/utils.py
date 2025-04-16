@@ -78,75 +78,6 @@ def _init_empty_ds(
     return ds
 
 
-def _mapping_hru(
-    hru: gpd.GeoDataFrame,
-    gru_label: str,
-    hru_label: str,
-) -> dict:
-    """Create a mapping dictionary from HRU identifiers to their corresponding GRU identifiers.
-
-    Parameters
-    ----------
-    hru : gpd.GeoDataFrame
-        GeoDataFrame containing HRU and GRU information. Must contain the columns
-        specified by gru_label and hru_label.
-    gru_label : str
-        Column name in `hru` that contains the GRU (Grouped Response Unit) identifiers.
-    hru_label : str
-        Column name in `hru` that contains the HRU (Hydrologic Response Unit) identifiers.
-
-    Returns
-    -------
-    dict
-        A dictionary where keys are HRU identifiers and values are the corresponding
-        GRU identifier for each HRU.
-
-    Raises
-    ------
-    TypeError
-        If input hru is not a GeoDataFrame
-        If gru_label or hru_label are not strings
-    ValueError
-        If specified columns are not in the GeoDataFrame
-        If there are duplicate HRU identifiers
-        If any GRU values are null/missing
-
-    Examples
-    --------
-    >>> hru_data = gpd.GeoDataFrame({
-    ...     'HRU_ID': [1, 2, 3, 4],
-    ...     'GRU_ID': ['A', 'A', 'B', 'B']
-    ... })
-    >>> _mapping_hru(hru_data, 'GRU_ID', 'HRU_ID')
-    {1: 'A', 2: 'A', 3: 'B', 4: 'B'}
-    """
-    # Input type validation
-    if not isinstance(hru, gpd.GeoDataFrame):
-        raise TypeError("hru must be a GeoDataFrame")
-    if not isinstance(gru_label, str) or not isinstance(hru_label, str):
-        raise TypeError("gru_label and hru_label must be strings")
-
-    # Column existence validation
-    missing_cols = [col for col in [gru_label, hru_label] if col not in hru.columns]
-    if missing_cols:
-        raise ValueError(f"Columns not found in hru: {', '.join(missing_cols)}")
-
-    # Data quality checks
-    if hru[hru_label].duplicated().any():
-        raise ValueError("Duplicate HRU identifiers found - each HRU should be unique")
-    if hru[gru_label].isnull().any():
-        raise ValueError("Null values found in GRU identifiers")
-
-    # Create and return the mapping
-    mapping = hru.groupby(hru_label)[gru_label].first().to_dict()
- 
-    # Verify mapping completeness
-    if len(mapping) != len(hru):
-        raise RuntimeError("Unexpected error in mapping creation - size mismatch")
- 
-    return mapping
-
-
 def _calculate_centroids(
     gdf: gpd.GeoDataFrame,
     target_crs: str = 'EPSG:4326',
@@ -426,3 +357,39 @@ def nonunique_dict_values(
         dict_of_non_unique_values.update({value: [k for k, v in d.items() if v == value]})
 
     return dict_of_non_unique_values
+
+def _freq_longname(
+    freq_alias: 'str'
+) -> str:
+    """Returning fullname of a offset alias based on pandas conventions.
+
+    Paramters
+    ---------
+    freq_alias : str
+        Time offset alias which is usually a single character to represent
+        time interval frequencies, such as 'H' for 'hours'
+
+    Returns
+    -------
+    str
+        fullname of the time offset
+    """
+    # Routine checks
+    if not isinstance(freq_alias, str):
+        raise TypeError(f"Frequency value of \'{freq_alias}\' is not"
+                        "acceptable")
+
+    # Check common time frequency aliases
+    if freq_alias in ('H', 'h'):
+        return 'hours'
+    elif freq_alias in ('T', 'min'):
+        return 'minutes'
+    elif freq_alias in ('S'):
+        return 'seconds'
+    elif freq_alias in ('L', 'ms'):
+        return 'milliseconds'
+    else:
+        raise ValueError(f"frequency value \'{freq_alias}\' is not"
+                         "acceptable")
+
+    return

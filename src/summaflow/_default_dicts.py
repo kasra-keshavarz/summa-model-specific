@@ -2,18 +2,17 @@
 Default dictionaries
 """
 
-from summaflow import __about__
+from .__about__ import (
+    __version__
+)
 
 
 attributes_global_attrs_default = {
     'author': 'University of Calgary',
     'license': 'GNU General Public License v3 (or any later version)',
-    'purpose': (
-        'Created by SUMMA automated configuration scripts (SUMMAFlow) ',
-        'f{__about__.version}'
-        ),
+    'purpose': ("Created by SUMMA automated configuration scripts (SUMMAFlow)"
+        f" {__version__}"),
 }
-
 
 attributes_local_attrs_default = {
     'hruId': {
@@ -29,10 +28,14 @@ attributes_local_attrs_default = {
         'long_name': 'Index of downslope HRU (0 = basin outlet)',
         },
     'longitude': {
-        'long_name': 'Longitude of HRUs centroid',
+       'long_name': 'Longitude of HRUs centroid',
+       'standard_name': 'longitude',
+       'unit': 'degrees_east',
         },
     'latitude': {
         'long_name': 'Latitude of HRUs centroid',
+        'standard_name': 'latitude',
+        'unit': 'degress_north',
         },
     'elevation': {
         'long_name': 'Mean HRU elevation',

@@ -10,7 +10,6 @@ import geopandas as gpd
 import xarray as xr
 import pint
 import jinja2 as jij
-import pint_xarray
 
 from typing import (
     Dict,
@@ -19,6 +18,7 @@ from typing import (
     Any,
     Self,
     Optional,
+    TypeAlias,
 )
 
 # built-in libraries
@@ -30,7 +30,7 @@ import os
 import shutil
 import warnings
 
-# package imports
+# internal package imports
 from ._default_dicts import (
     attributes_global_attrs_default,
     attributes_local_attrs_default,
@@ -44,11 +44,17 @@ from ._default_dicts import (
 )
 from .utils import (
     _init_empty_ds,
-    _mapping_hru,
     _calculate_centroids,
-    _calculate_polygon_areas
+    _calculate_polygon_areas,
+    _freq_longname,
+)
+from .geospatial import (
+    GeoLayer,
+    Stats,
 )
 
+# Type definitions
+FIDType: TypeAlias = Union[str, int, float]
 
 class SUMMAWorkflow(object):
     """
@@ -313,9 +319,8 @@ class SUMMAWorkflow(object):
         # create an empty xarray.Dataset to be populated with SUMMA-specific
         # attributes
         self.attrs = _init_empty_ds(
-                         variables=variables,
-                         dims=default_dims,
-                     )
+            variables=variables,
+            dims=default_dims)
 
         # populating with necessary information obtained upon
         # instantiation; This class variable is a combination of
@@ -329,11 +334,11 @@ class SUMMAWorkflow(object):
         #       hard-coded here.
         _mheight_name = 'mHeight'
         self.attrs[_mheight_name] = SUMMAWorkflow._mheight(
-                                       forcing_attrs=self._forcing_attrs,
-                                       elements=self.hru,
-                                       element_name=self.dims['hru'],
-                                       height_name='measurement_height',
-                                       height_unit='measurement_height_unit')
+            forcing_attrs=self._forcing_attrs,
+            elements=self.hru,
+            element_name=self.dims['hru'],
+            height_name='measurement_height',
+            height_unit='measurement_height_unit')
 
         # 2. `slopeTypeIndex` which is "a legacy that is no longer used"
         #     reference: github.com/CH-Earth/CWARHM: step 5/SUMMA/1/1
@@ -342,35 +347,41 @@ class SUMMAWorkflow(object):
         #     to be read from the input objects.
         _slope_type_index_name = 'slopeTypeIndex'
         self.attrs[_slope_type_index_name] = SUMMAWorkflow._slope_type_index(
-                                                 slope_value=int(1),
-                                                 elements=self.hru,
-                                                 element_name=self.dims['hru'])
+            slope_value=int(1),
+            elements=self.hru,
+            element_name=self.dims['hru'])
 
         # 3. `hruId` and `gruId` values
         # Note:
         #     If needed, the hard-coded names here can be transformed to be read
         #     from the input objects.
-        self.attrs['gruId'] = SUMMAWorkflow._elements(
-                                  self.gru,
-                                  self.topology_attrs['gru_fid'],
-                                  'gru',
-                                  self.gru[gru_fid])
-        self.attrs['hruId'] = SUMMAWorkflow._elements(
-                                  self.hru,
-                                  self.topology_attrs['hru_fid'],
-                                  'hru',
-                                  self.hru[hru_fid])
+        _gru_id_name = 'gruId'
+        _hru_id_name = 'hruId'
+        self.attrs[_gru_id_name] = SUMMAWorkflow._elements(
+            self.gru,
+            self.topology_attrs['gru_fid'],
+            'gru',
+            self.gru[gru_fid])
+        self.attrs[_hru_id_name] = SUMMAWorkflow._elements(
+            self.hru,
+            hru_fid,
+            'hru',
+            self.hru[hru_fid])
 
         # 4. `hru2gruId` values
         # Note:
         #     The `topology` needs to become a systematic object using
-        #     `hydrant` but unfortunately the project is being dropped.
-        mapping = _mapping_hru(
+        #     `hydrant` but unfortunately the project does not have much
+        #     support.
+        _hru_mapping_gru_name = 'hru2gruId'
+        mapping = SUMMAWorkflow._mapping_hru(
+            gru=self.gru,
             hru=self.hru,
-            gru_label=gru_fid,
-            hru_label=hru_fid,
+            gru_fid=gru_fid,
+            hru_fid=hru_fid,
+            mapping_fid=gru_fid,
         )
-        self.attrs['hru2gruId'] = xr.DataArray(
+        self.attrs[_hru_mapping_gru_name] = xr.DataArray(
             pd.Series(mapping),
             dims=["hru"],    # Name of the dimension
             name="hru2gruId" # Name of the variable
@@ -388,7 +399,9 @@ class SUMMAWorkflow(object):
         }
         centroids = _calculate_centroids(self.hru)
         for k, v in coords_defs.items():
-            self.attrs[k] = xr.DataArray(centroids[v], coords={'hru': centroids[hru_fid]})
+            self.attrs[k] = xr.DataArray(
+                centroids[v],
+                coords={'hru': centroids[hru_fid]})
 
         # 6. `area` values
         # Notes:
@@ -405,7 +418,7 @@ class SUMMAWorkflow(object):
             attrs={'unit': area_unit})
 
         # Up to Martyn & his staff: the values decided in various workflows
-        #    are inconsistent.
+        #    are not similar.
         #
         # 7. `tan_slope` values
         #    Darri: uses np.gradient
@@ -430,36 +443,97 @@ class SUMMAWorkflow(object):
 
         # 10. `geospatial` layers
         # 10.1 `eleveation` layer
-        # FIXME: very rough implementation - make it better
-        self.attrs['elevation'] = xr.DataArray(
-            data=self.geospatial_data['elevation'].stats['mean'],
-            coords={
-                'hru': self.geospatial_data['elevation'].stats['mean'].index.values,
-            },
-            attrs={'unit': self.geospatial_data['elevation'].unit}
-        )
+        _elv_name = 'elevation'
+        elv = SUMMAWorkflow._geolayer_info(
+            self.geospatial_data[_elv_name],
+            _elv_name,
+            'mean',
+            'hru')
         # 10.2 `vegTypeIndex` layer
-        self.attrs['vegTypeIndex'] = xr.DataArray(
-            data=self.geospatial_data['landcover'].stats['majority'],
-            coords={
-                'hru': self.geospatial_data['landcover'].stats['majority'].index.values,
-            },
-            attrs={'unit': self.geospatial_data['landcover'].unit}
-        )
+        _veg_name = 'vegTypeIndex'
+        veg = SUMMAWorkflow._geolayer_info(
+            self.geospatial_data[_veg_name],
+            _veg_name,
+            'majority',
+            'hru')
         # 10.3 `soilTypeIndex` layer
-        # FIXME: This is also doable through the trialParams.nc file
-        self.attrs['soilTypeIndex'] = xr.DataArray(
-            data=self.geospatial_data['soil'].stats['majority'],
-            coords={
-                'hru': self.geospatial_data['soil'].stats['majority'].index.values,
-            },
-            attrs={'unit': self.geospatial_data['soil'].unit}
+        _soil_name = 'soilTypeIndex'
+        soil = SUMMAWorkflow._geolayer_info(
+            self.geospatial_data[_soil_name],
+            _soil_name,
+            'majority',
+            'hru')
+
+        _geolayers = {
+            _elv_name: elv,
+            _veg_name: veg,
+            _soil_name: soil
+        }
+        
+        # Adding Geospatial layers to `self.attrs`
+        self.attrs.update(_geolayers)
+
+        # Updating local attributes 
+        # Assign attributes to each variable
+        for var_name, attrs in attributes_local_attrs_default.items():
+            if var_name in self.attrs:
+                self.attrs[var_name].attrs.update(attrs)
+        # Updating global attributes
+        self.attrs = self.attrs.assign_attrs(
+            attributes_global_attrs_default
         )
 
+        return self.attrs
+
+    def init_forcing(
+        self,
+    ) -> None:
+        """Prepare forcing dataset for the SUMMA setup. The preparation step
+        involves name change, unit adjustments, and sorting (SUMMA-specific)
+        NetCDF files as the forcing inputs. The default inputs are always
+        NetCDF files, so no flexibility is implemented for other data formats.
+        Another step is to sort the NetCDF files and create a textual file
+        listing all inputs.
+
+        Notes
+        -----
+        - Timezone naming scheme (TZ) follows IANA's convention found at the
+          following link: 
+          
+        """
+        # Iterate over the dataset files and implement necessary adjustments
+        # FIXME: Can be parallelized via Dask, though creating dask clusters
+        #        on HPCs can be challenging.
+        for forcing in self.forcing_data:
+            # Adjust the timezone of the file if necessary
+            pass
         return
 
     # static methods
-    # mHeight func
+    @staticmethod 
+    def _specify_time_encodings(
+        ds: xr.Dataset,
+        time_var: str = 'time',
+    ) -> Dict[str, Dict[str, str]]:
+        """Necessary adhoc modifications on the forcing object's
+        encoding
+        """
+        # empty encoding dictionary of the `time` variable
+        ds[time_var].encoding = {}
+        # estimate the frequency offset value
+        _freq = pd.infer_freq(ds[time_var])
+        # get the full name
+        _freq_long = utils.freq_long_name(_freq)
+
+        # Encoding dictionary appropriate to be included as a local attribute
+        _encoding = {
+            'time': {
+                'units': f'{_freq_long} since 1900-01-01 12:00:00'
+            }
+        }
+
+        return _encoding
+
     @staticmethod
     def _mheight(
         forcing_attrs: Dict[str, str],
@@ -478,7 +552,7 @@ class SUMMAWorkflow(object):
             A seuqence of GRU values.
         element_name : str
             Name of the `elements` being used as the dimension of returned 
-            DataArray.
+            |DataArray|.
         height_name : str
             Variable defining measurement height value in `forcing_attrs` keys.
 
@@ -513,7 +587,7 @@ class SUMMAWorkflow(object):
             A seuqence of HRU/GRU values.
         element_name : str
             Name of the `elements` being used as the dimension of returned 
-            DataArray.
+            |DataArray|.
 
         References
         ----------
@@ -524,6 +598,30 @@ class SUMMAWorkflow(object):
         slope_type_index_values = [int(slope_value)] * len(elements)
 
         return xr.DataArray(slope_type_index_values, dims=element_name)
+
+    @staticmethod
+    def _tan_slope(
+        hru: gpd.GeoDataFrame,
+    ) -> xr.DataArray:
+        """To be completed after discussion"""
+
+        return
+
+    @staticmethod
+    def _contour_length(
+        hru: gpd.GeoDataFrame,
+    ) -> xr.DataArray:
+        """To be completed after discussion"""
+
+        return
+
+    @staticmethod
+    def _down_hru_index(
+        hru: gpd.GeoDataFrame,
+    ) -> xr.DataArray:
+        """To be completed after discussion"""
+
+        return
 
     @staticmethod
     def _elements(
@@ -545,13 +643,154 @@ class SUMMAWorkflow(object):
 
         return xr.DataArray(geom[fid], coords={dim_name: dim_value})
 
+    @staticmethod
+    def _mapping_hru(
+        gru: gpd.GeoDataFrame,
+        hru: gpd.GeoDataFrame,
+        gru_fid: str,
+        hru_fid: str,
+        mapping_fid: str,
+    ) -> Dict[FIDType, FIDType]:
+        """Create a mapping dictionary from HRU identifiers to their corresponding GRU identifiers.
 
-    # slopeTypeIndex
-    # gruId
-    # hruId
-    # hru2gruId
-    # centroid
-    # HRUarea
-    # elevation
-    # soilTypeIndex
-    # vegTypeIndex
+        Parameters
+        ----------
+        gru : gpd.GeoDataFrame
+            GeoDataFrame containing GRU information. Must contain the columns 
+            specified by `gru_fid`.
+        hru : gpd.GeoDataFrame
+            GeoDataFrame containing HRU information. Must contain the columns
+            specified by `hru_fid`.
+        gru_fid : str
+            Column name in `gru` that contains the GRU (Grouped Response Unit) identifiers.
+        hru_fid : str
+            Column name in `hru` that contains the HRU (Hydrologic Response Unit) identifiers.
+        mapping_fid : dict of FIDType keys and values
+            Name mapping information from `hru` to `gru` data within `hru` object.
+
+        Returns
+        -------
+        Dist[FIDType, FIDType]
+            A dictionary where keys are HRU identifiers and values are the corresponding
+            GRU identifier for each HRU.
+
+        Raises
+        ------
+        TypeError
+            If input hru is not a GeoDataFrame
+            If gru_fid or hru_fid are not strings
+        ValueError
+            If specified columns are not in the GeoDataFrame
+            If there are duplicate HRU identifiers
+            If any GRU values are null/missing
+
+        Notes
+        -----
+        - The HRU and GRU defintions can be found in [1].
+
+        References
+        ----------
+        .. [1] Clark et al., (2015). “A Unified Approach for Process-Based
+               Hydrologic Modeling: 1. Modelling Concept”
+               DOI: 10.1002/2015WR017198
+        """
+        # Input type validation
+        if not isinstance(hru, gpd.GeoDataFrame):
+            raise TypeError("`hru` must be a geopandas.GeoDataFrame object.")
+        if not isinstance(gru, gpd.GeoDataFrame):
+            raise TypeError("`gru` must be a geopandas.GeoDataFrame object.")
+        if not isinstance(gru_fid, str) or not isinstance(hru_fid, str):
+            raise TypeError("`gru_fid` and `hru_fid` must be of type string.")
+
+        # Column existence validation
+        missing_cols = [
+            f"{hru_fid} (in hru)" if hru_fid not in hru.columns else None,
+            f"{gru_fid} (in gru)" if gru_fid not in gru.columns else None
+        ]
+        missing_cols = [col for col in missing_cols if col is not None]
+        if missing_cols:
+            raise ValueError(f"Missing columns: {', '.join(missing_cols)}")
+
+        # Check to see if `hru` and `gru` are equal objects
+        if hru.equals(gru):
+            pass
+        else:
+            # Data quality checks for HRU and GRU identifiers
+            for gdf, fid, name in [(hru, hru_fid, "HRU"), (gru, gru_fid, "GRU")]:
+                if gdf[fid].duplicated().any():
+                    raise ValueError(f"Duplicate {name} identifiers found - each {name} should be unique.")
+                if gdf[fid].isnull().any():
+                    raise ValueError(f"Null values found in {name} identifiers.")
+
+        # The values associated with mapping_fid should have equal length compared
+        # to the corresponding `gru_fid` values
+        _gru_elements = set(gru[gru_fid])
+        _mapping_elements = set(hru[mapping_fid])
+        if not _gru_elements.issubset(_mapping_elements):
+            raise IndexError("`hru` does not cover all available `gru` elements.")
+
+        # Create and return the mapping
+        mapping = hru.groupby(hru_fid)[mapping_fid].first().to_dict()
+ 
+        # Verify mapping completeness
+        if len(mapping) != len(hru):
+            raise RuntimeError("Unexpected error in mapping creation - size mismatch")
+ 
+        return mapping
+
+    @staticmethod
+    def _geolayer_info(
+        layer: GeoLayer,
+        layer_name: str,
+        stat_names: Sequence[str] | str,
+        dim_name: str,
+        unit: pint.Unit = None,
+    ) -> xr.DataArray:
+        """GeoLayer information in form of a |DataArray|
+
+        Parameters
+        ----------
+        layer : GeoLayer
+            A GeoLayer holding necessary information needed for a SUMMA setup.
+        name : str
+            The name of the GeoLayer assigned to the returned |DataArray|
+            needed for a SUMMA setup.
+        stat_names : Sequence of str or str
+            One or more statistics that needs to be reported for a SUMMA
+            setup.
+        dim_name : str
+            The dimension name used for representing values for each SUMMA
+            element.
+        unit : pint.Unit or `None`
+            If GeoLayer's unit needs to be changed, this sepcifies the target
+            unit of interest.
+
+        Returns
+        -------
+        |DataArray|
+            A |DataArray| describing the layer of interest needed for a SUMMA
+            setup.
+
+        Notes
+        -----
+        - It is assumed that layer holds relevant unit and statistics,
+          however, upon need, that can change into `unit`.
+        """
+        # Routine checks
+        if not isinstance(layer, GeoLayer):
+            raise TypeError("`layer` must be of type GeoLayer.")
+
+        # If `unit` is defined, convert the unit of the layer
+        if unit:
+            layer.to_unit(unit)
+
+        da = xr.DataArray(
+            data=layer.stats[stat_names],
+            coords={
+                dim_name: layer.stats[stat_names].index.values,
+            },
+            attrs={'unit': layer.unit},
+            name=layer_name,
+        )
+
+        return da
