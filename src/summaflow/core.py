@@ -8,8 +8,11 @@ import pandas as pd
 import numpy as np
 import geopandas as gpd
 import xarray as xr
-import pint
 import jinja2 as jij
+
+import pint_xarray
+import pint
+import pytz
 
 from typing import (
     Dict,
@@ -18,6 +21,7 @@ from typing import (
     Any,
     Self,
     Optional,
+    Tuple,
     TypeAlias,
 )
 
@@ -78,7 +82,6 @@ class SUMMAWorkflow(object):
     See Also
     --------
     pint : The pint package for handling units in Python.
-
     """
     # main constructor
     def __init__(
@@ -94,6 +97,7 @@ class SUMMAWorkflow(object):
         topology_to_unit_mapping: Dict[str, str],
         geospatial_data: Optional[Dict[str, Dict]] = None,
         dims: Optional[Dict[str, str]] = default_dims,
+        settings: Dict[str, Any] = {},
     ) -> None:
 
         """
@@ -218,7 +222,7 @@ class SUMMAWorkflow(object):
         self.topology_units = topology_unit_mapping
         self.topology_to_units = topology_to_unit_mapping
 
-        # dimension names
+        # Dimension names
         self.dims = dims
 
         # `init` object to add lazy-like behaviour
@@ -226,6 +230,12 @@ class SUMMAWorkflow(object):
 
         # Geospatial data
         self.geospatial_data = geospatial_data
+
+        # Workflow settings
+        self.settings = settings
+
+        # Pint unit registry
+        self._ureg = pint.UnitRegistry(force_ndarray_like=True)
 
         return
 
@@ -498,18 +508,173 @@ class SUMMAWorkflow(object):
         Notes
         -----
         - Timezone naming scheme (TZ) follows IANA's convention found at the
-          following link: 
-          
+          following link (version 2025b):
+            https://data.iana.org/time-zones/releases/tzdb-2025b.tar.lz
+ 
         """
         # Iterate over the dataset files and implement necessary adjustments
         # FIXME: Can be parallelized via Dask, though creating dask clusters
         #        on HPCs can be challenging.
-        for forcing in self.forcing_data:
-            # Adjust the timezone of the file if necessary
-            pass
+        if self._forcing_attrs['forcing_time_zone']:
+            _forcing_tz = self._forcing_attrs['forcing_time_zone'].lower()
+        else:
+            _forzing_tz = 'local'
+
+        if self._forcing_attrs['target_time_zone']:
+            _target_tz = self._forcing_attrs['target_time_zone'].lower()
+        else:
+            _target_tz = 'local'
+
+        # Specify the `forcing` and `target` timezones and also the string
+        # for the "fileManager"
+        forcing_tz, target_tz, tz_info = SUMMAWorkflow._specify_tz(_forcing_tz, _target_tz)
+        self._forcing_attrs['tz_info'] = tz_info
+
+        # Time travel to late-90s and go over the NetCDF files one
+        # by one
+
+        # FIXME: Considering Dask for parallelization in near future
+        for forcing in self._forcing:
+            # First read the forcing file, using Xarray
+            ds = xr.open_dataset(forcing)
+
+            # Change timezone and assing tz-naive datetime64[ns] timestamps
+            if target_tz not in ('local'):
+                ds = ds.assign_coords({
+                   'time': ds.time.to_index().tz_localize(forcing_tz).tz_convert(target_tz).tz_localize(None)
+                })
+
+            # Rename variables
+            ds = ds.rename_vars(self.forcing_vars)
+
+            # Change units
+            # Check if all units provided are present in the forcing file(s)
+            for k in self.forcing_units:
+                if k not in ds:
+                    raise ValueError(f"item {k} defined in "
+                                     "`forcing_unit_mapping` cannot be found"
+                                     " in `forcing_name_mapping` values.")
+
+            # If all elements of `variables` not found in `units`,
+            # assign them to None
+            for v in ds:
+                if v not in self.forcing_vars.values():
+                    self.forcing_units[v] = 'dimensionless'
+
+            # Now assign the units
+            ds = ds.pint.quantify(units=self.forcing_units, unit_registry=self._ureg)
+ 
+            # If `to_units` is defined
+            if self.forcing_to_units:
+                ds = ds.pint.to(units=self.forcing_to_units)
+
+            # Print the netCDF file
+            ds = ds.pint.dequantify()
+
+        return
+
+    def _unit_change(
+        self: Self,
+    ) -> xr.Dataset:
+
         return
 
     # static methods
+    @staticmethod
+    def _specify_tz(
+        forcing: str,
+        target: str,
+    ) -> Tuple[str, str, str]:
+        """Based on SUMMA's functionality, return a tuple containing
+        `forcing` and `target` time-zones that can be used with pandas.Index
+        `.tz_localize(...)` and `.tz_convert(...)` functionality.
+
+        Parameters
+        ----------
+        forcing : str
+            User-specified reference, original forcing dataset timezone. Can
+            be ``UTC``, ``GMT``, ``local`` or an IANA timezone string.
+        target : str
+            Target timezone for SUMMA configurations. Can be ``UTC``, ``GMT``,
+            ``local`` or an IANA timezone string.
+
+        Returns
+        -------
+        Tuple
+            A tuple object containing forcing and target timezones for further
+            adjustments by `.tz_localize(...)` and `.tz_convert(...)`
+            functions. The last element is `tz_info` that should be specified
+            in SUMMA's "filemanager".
+
+        Raises
+        ------
+        ValueError
+            - If forcing is set to `local` but the target is another known
+              timezone, it is considered ambiguous.
+            - If target timezone is ambiguous.
+
+        Notes
+        -----
+        - If `forcing` and `target` cannot be interpretted, or not acceptable
+          by the model, necessary raises are thrown.
+        """
+        # Routine error checks
+        if not isinstance(forcing, str):
+            raise TypeError("forcing time zone needs to be of dtype `str`.")
+        if not isinstance(target, str):
+            raise TypeError("target time zone needs to be of dtype `str`.")
+
+        # Working with lowercase strings
+        target = target.lower()
+        forcing = forcing.lower()
+
+        # List of lowercase IANA timezones
+        time_zones = (tz.lower() for tz in pytz.common_timezones)
+
+        # `local` timezone is ambiguous alone, unless both `forcing` and
+        # `target` are set to `local`, trusting user's time manipulations.
+        if forcing in ("local") and target not in ("local"):
+            raise ValueError("If forcing time zone is set to `local`, the" 
+                " target must necessarily be `local`.")
+
+        # If set to `utc` (or `gmt`), go and adjust `forcing`
+        # if necessary
+        if target in ('utc', 'gmt'):
+            # If target and forcing tzs are both UTC, do nothing
+            if forcing in ('utc', 'gmt'):
+                tz_info = 'utcTime'
+
+            # If target is `utc` and forcing is a local tz, convert to
+            # `utc`
+            elif forcing in time_zones:
+                tz_info = 'utcTime'
+
+            else:
+                raise ValueError("forcing time zone ambiguous.")
+
+        # If user knows what a target local timezone is and can handle it
+        # no need to change the tzs
+        elif target in ('local'):
+            if forcing not in ('local'):
+                raise ValueError("target time zone ambiguous.")
+            else:
+                tz_info = 'localTime'
+
+        # If target timezone is set to a IANA-standard timezone
+        elif target in time_zones:
+            if forcing in time_zones or forcing in ('utc' , 'gmt'):
+                # If user specifies an IANA-standard timezone
+                tz_info = 'localTime'
+            else:
+                raise ValueError("forcing time zone ambiguous.")
+
+        # Else, if user provided invalid value for target time-zone,
+        # raise ValueError
+        else:
+            raise ValueError("target time zone ambiguous.")
+
+        return (forcing, target, tz_info)
+
     @staticmethod 
     def _specify_time_encodings(
         ds: xr.Dataset,
