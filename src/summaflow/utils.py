@@ -377,7 +377,7 @@ def _freq_longname(
     # Routine checks
     if not isinstance(freq_alias, str):
         raise TypeError(f"Frequency value of \'{freq_alias}\' is not"
-                        "acceptable")
+                        " acceptable.")
 
     # Check common time frequency aliases
     if freq_alias in ('H', 'h'):
@@ -390,6 +390,6 @@ def _freq_longname(
         return 'milliseconds'
     else:
         raise ValueError(f"frequency value \'{freq_alias}\' is not"
-                         "acceptable")
+                         " acceptable.")
 
     return

@@ -32,6 +32,7 @@ import sys
 import glob
 import os
 import shutil
+import pathlib
 import warnings
 
 # internal package imports
@@ -95,6 +96,7 @@ class SUMMAWorkflow(object):
         topology_attrs: Dict[str, str],
         topology_unit_mapping: Dict[str, str],
         topology_to_unit_mapping: Dict[str, str],
+        cold_state: Dict[str, Any],
         geospatial_data: Optional[Dict[str, Dict]] = None,
         dims: Optional[Dict[str, str]] = default_dims,
         settings: Dict[str, Any] = {},
@@ -193,7 +195,7 @@ class SUMMAWorkflow(object):
         # FIXME: This needs to turn into its own object, but for the
         #        sake of timing of this deliverable, we compromise and treat
         #        them as different variables starting with `forcing_`.
-        self._forcing = forcing_data
+        self._forcing = sorted(forcing_data)
         self.forcing_vars = forcing_name_mapping
         self._forcing_attrs = forcing_attrs
         self.forcing_units = forcing_unit_mapping
@@ -228,11 +230,15 @@ class SUMMAWorkflow(object):
         # `init` object to add lazy-like behaviour
         self.init = False
 
+        # 
+
         # Geospatial data
         self.geospatial_data = geospatial_data
 
         # Workflow settings
         self.settings = settings
+        # Make the directory for the outputs
+        os.makedirs(self.settings['model_path'], exist_ok=True)
 
         # Pint unit registry
         self._ureg = pint.UnitRegistry(force_ndarray_like=True)
@@ -304,6 +310,7 @@ class SUMMAWorkflow(object):
     # object methods
     def init_attrs(
         self,
+        return_ds: bool = False,
     ) -> None:
         """Initialize the necessary objects for the experient"""
         # variables to build an empty SUMMA-specific `attribute` object
@@ -427,9 +434,6 @@ class SUMMAWorkflow(object):
             coords={'hru': areas[hru_fid].values},
             attrs={'unit': area_unit})
 
-        # Up to Martyn & his staff: the values decided in various workflows
-        #    are not similar.
-        #
         # 7. `tan_slope` values
         #    Darri: uses np.gradient
         #    Mohamed: uses river slope values
@@ -451,22 +455,43 @@ class SUMMAWorkflow(object):
         #    Mohamed: all constant 0 values
         #    Wouter: Set the downHRUindex based on elevation data
 
-        # 10. `geospatial` layers
-        # 10.1 `eleveation` layer
+        # 7. `geospatial` layers
+        # 7.1 `tan_slope` layer
+        _slope_name = 'tan_slope'
+        slope = SUMMAWorkflow._geolayer_info(
+            self.geospatial_data[_slope_name],
+            _slope_name,
+            'mean',
+            'hru')
+        # 7.2 `contourLength` layer
+        _contour_name = 'contourLength'
+        contour = SUMMAWorkflow._geolayer_info(
+            self.geospatial_data[_contour_name],
+            _contour_name,
+            'mean',
+            'hru')
+        # 7.3 `downHRUindex` layer
+        _hruidx_name = 'downHRUindex'
+        hru_index = SUMMAWorkflow._geolayer_info(
+            self.geospatial_data[_hruidx_name],
+            _hruidx_name,
+            'mean',
+            'hru')
+        # 7.4 `eleveation` layer
         _elv_name = 'elevation'
         elv = SUMMAWorkflow._geolayer_info(
             self.geospatial_data[_elv_name],
             _elv_name,
             'mean',
             'hru')
-        # 10.2 `vegTypeIndex` layer
+        # 7.5 `vegTypeIndex` layer
         _veg_name = 'vegTypeIndex'
         veg = SUMMAWorkflow._geolayer_info(
             self.geospatial_data[_veg_name],
             _veg_name,
             'majority',
             'hru')
-        # 10.3 `soilTypeIndex` layer
+        # 7.6 `soilTypeIndex` layer
         _soil_name = 'soilTypeIndex'
         soil = SUMMAWorkflow._geolayer_info(
             self.geospatial_data[_soil_name],
@@ -475,11 +500,14 @@ class SUMMAWorkflow(object):
             'hru')
 
         _geolayers = {
+            _slope_name: slope,
+            _contour_name: contour,
+            _hruidx_name: hru_index,
             _elv_name: elv,
             _veg_name: veg,
             _soil_name: soil
         }
-        
+ 
         # Adding Geospatial layers to `self.attrs`
         self.attrs.update(_geolayers)
 
@@ -493,28 +521,36 @@ class SUMMAWorkflow(object):
             attributes_global_attrs_default
         )
 
-        return self.attrs
+        if return_ds:
+            return self.attrs
+        else:
+            return
 
     def init_forcing(
         self,
-    ) -> None:
-        """Prepare forcing dataset for the SUMMA setup. The preparation step
-        involves name change, unit adjustments, and sorting (SUMMA-specific)
-        NetCDF files as the forcing inputs. The default inputs are always
-        NetCDF files, so no flexibility is implemented for other data formats.
-        Another step is to sort the NetCDF files and create a textual file
-        listing all inputs.
+        return_ds: bool = False,
+    ) -> Optional[xr.Dataset]:
+        """"Prepare forcing dataset for the SUMMA setup.
+
+        The preparation involves:
+            - Name changes and unit adjustments
+            - Sorting (SUMMA-specific) NetCDF files as forcing inputs
+            - Creating a text file listing all inputs
+
+        Parameters
+        ----------
+        return_ds : bool, optional
+            If True, returns the prepared dataset (default=False).
 
         Notes
         -----
         - Timezone naming scheme (TZ) follows IANA's convention found at the
           following link (version 2025b):
             https://data.iana.org/time-zones/releases/tzdb-2025b.tar.lz
+        - Only NetCDF files are supported as inputs.
  
         """
-        # Iterate over the dataset files and implement necessary adjustments
-        # FIXME: Can be parallelized via Dask, though creating dask clusters
-        #        on HPCs can be challenging.
+        # If the timezone is not provided, hard-coded assumption to `local`
         if self._forcing_attrs['forcing_time_zone']:
             _forcing_tz = self._forcing_attrs['forcing_time_zone'].lower()
         else:
@@ -530,13 +566,46 @@ class SUMMAWorkflow(object):
         forcing_tz, target_tz, tz_info = SUMMAWorkflow._specify_tz(_forcing_tz, _target_tz)
         self._forcing_attrs['tz_info'] = tz_info
 
-        # Time travel to late-90s and go over the NetCDF files one
-        # by one
+        # File generation is done within this function as SUMMA does not have
+        # other mechanisms in reading forcing files
 
-        # FIXME: Considering Dask for parallelization in near future
+        # Create the forcing dataset list file
+        list_file = pathlib.Path(os.path.join(
+            self.settings['model_path'],
+            'settings',
+            'SUMMA',
+            'forcingFileList.txt'))
+        # Create parent directories if they don't exist
+        list_file.parent.mkdir(parents=True, exist_ok=True)
+        list_file.touch()
+        list_file.write_text('')
+
+        # FIXME: Considering Dask/joblib/others for parallelization
         for forcing in self._forcing:
+            # Extract filename
+            filename = os.path.basename(forcing)
+
             # First read the forcing file, using Xarray
             ds = xr.open_dataset(forcing)
+
+            # Change object's `time` encoding
+            ds.time.encoding = {}
+            ds.time.encoding = SUMMAWorkflow._specify_time_encodings(ds.time)
+
+            # Rename variables
+            ds = ds.rename_vars(self.forcing_vars)
+            # Only select variables included in `self.forcing_vars`
+            ds = ds[[*self.forcing_vars.values()]]
+
+            # Change units
+            ds = SUMMAWorkflow._unit_change(
+                ds,
+                self.forcing_units,
+                self.forcing_to_units,
+                self._ureg)
+
+            # Assure the order of dimensions are similar to that of self.attrs
+            ds = ds.reindex(dims=self.attrs.dims)
 
             # Change timezone and assing tz-naive datetime64[ns] timestamps
             if target_tz not in ('local'):
@@ -544,42 +613,100 @@ class SUMMAWorkflow(object):
                    'time': ds.time.to_index().tz_localize(forcing_tz).tz_convert(target_tz).tz_localize(None)
                 })
 
-            # Rename variables
-            ds = ds.rename_vars(self.forcing_vars)
+            # Create the output directory for forcing files
+            os.makedirs(os.path.join(self.settings['model_path'], 'forcing'), exist_ok=True)
+            # Save forcing file
+            ds.to_netcdf(
+                os.path.join(self.settings['model_path'], 'forcing', filename),
+                format='NETCDF4_CLASSIC',
+                unlimited_dims=['time'])
+            # Create a list of forcing files
+            with list_file.open('a', encoding='utf-8') as f:
+                f.write(f'{filename}\n')
 
-            # Change units
-            # Check if all units provided are present in the forcing file(s)
-            for k in self.forcing_units:
-                if k not in ds:
-                    raise ValueError(f"item {k} defined in "
-                                     "`forcing_unit_mapping` cannot be found"
-                                     " in `forcing_name_mapping` values.")
+            # Close the dataset
+            ds.close()
 
-            # If all elements of `variables` not found in `units`,
-            # assign them to None
-            for v in ds:
-                if v not in self.forcing_vars.values():
-                    self.forcing_units[v] = 'dimensionless'
+        if return_ds:
+            # Just a representation---really rough return
+            return xr.open_mfdataset(self._forcing)
+        else:
+            return
 
-            # Now assign the units
-            ds = ds.pint.quantify(units=self.forcing_units, unit_registry=self._ureg)
- 
-            # If `to_units` is defined
-            if self.forcing_to_units:
-                ds = ds.pint.to(units=self.forcing_to_units)
+    def init_coldstate(
+        self,
+        return_ds: bool = False,
+    ) -> Optional[xr.Dataset]:
+        """Creating self.coldstate and optionally returning it
+        """
 
-            # Print the netCDF file
-            ds = ds.pint.dequantify()
-
-        return
-
-    def _unit_change(
-        self: Self,
-    ) -> xr.Dataset:
-
-        return
+        if return_ds:
+            return self.coldstate
+        else:
+            return
 
     # static methods
+    @staticmethod
+    def _unit_change(
+        ds: xr.Dataset,
+        units: Dict[str, str],
+        to_units: Dict[str, str] = None,
+        missing_unit: str = 'dimensionless',
+        unit_registry: pint.UnitRegistry = None,
+    ) -> Tuple[xr.Dataset, pint.UnitRegistry]:
+        """Changing units for an xarray.Dataset object
+
+        Parameters
+        ----------
+        ds : |Dataset|
+            A xarray.Dataset object containing at least one variable.
+        units : dict of str keys and values
+            The keys shows `ds` variables and corresponding values represent
+            physical units associated with variables. If any variable is
+            missing, it is assigned as 'dimensionless'.
+        to_units : dict of str keys and values [defaults to `None`]
+            Similar structure to `units` but representing target units of each
+            variable.
+        missing_unit : str [defaults to 'dimensionless']
+            Unit value for variables defined in `ds` but not available in
+            `units`. The behaviour defaults to 'dimensionless' unit.
+        unit_registry : pint.UnitRegistry [default to ``None``]
+            Pint unit registry to query physical units.
+
+        Raises
+        ------
+        IndexError
+            If |Dataset| does not have at least one variable.
+        """
+        # Check to see if the Dataset provides at least one variable
+        if len(ds.variables) == 0:
+            raise IndexError("`ds` must at least contain one variable.")
+
+        # Check if all units provided are present in the forcing file(s)
+        for k in units:
+            if k not in ds:
+                raise ValueError(f"item {k} defined in "
+                                 "`forcing_unit_mapping` cannot be found"
+                                 " in `forcing_name_mapping` values.")
+
+        # If all elements of `variables` not found in `units`,
+        # assign them to None
+        for v in ds:
+            if v not in units.keys():
+                units[v] = 'dimensionless'
+
+        # Now assign the units
+        ds = ds.pint.quantify(units=units, unit_registry=unit_registry)
+
+        # If `to_units` is defined
+        if to_units:
+            ds = ds.pint.to(units=to_units)
+
+        # Print the netCDF file
+        ds = ds.pint.dequantify()
+
+        return ds
+
     @staticmethod
     def _specify_tz(
         forcing: str,
@@ -677,24 +804,23 @@ class SUMMAWorkflow(object):
 
     @staticmethod 
     def _specify_time_encodings(
-        ds: xr.Dataset,
-        time_var: str = 'time',
+        time_stamps: Sequence[np.datetime64],
     ) -> Dict[str, Dict[str, str]]:
         """Necessary adhoc modifications on the forcing object's
         encoding
         """
-        # empty encoding dictionary of the `time` variable
-        ds[time_var].encoding = {}
         # estimate the frequency offset value
-        _freq = pd.infer_freq(ds[time_var])
+        _freq = pd.infer_freq(time_stamps)
         # get the full name
-        _freq_long = utils.freq_long_name(_freq)
+        _freq_long = _freq_longname(_freq)
 
-        # Encoding dictionary appropriate to be included as a local attribute
+        # Encoding dictionary appropriate to be included as a local attribute;
+        # The default starting date is hard-coded, as it is a safe date to
+        # include;
+        # Time string format is non-standard
         _encoding = {
-            'time': {
-                'units': f'{_freq_long} since 1900-01-01 12:00:00'
-            }
+            'units': f'{_freq_long} since 1900-01-01 00:00',
+            'calendar': 'gregorian',
         }
 
         return _encoding
