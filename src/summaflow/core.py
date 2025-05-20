@@ -8,7 +8,6 @@ import pandas as pd
 import numpy as np
 import geopandas as gpd
 import xarray as xr
-import jinja2 as jij
 
 import pint_xarray
 import pint
@@ -34,6 +33,7 @@ import os
 import shutil
 import pathlib
 import warnings
+import itertools
 
 # internal package imports
 from ._default_dicts import (
@@ -228,9 +228,10 @@ class SUMMAWorkflow(object):
         self.dims = dims
 
         # `init` object to add lazy-like behaviour
-        self.init = False
+        self.init = []
 
-        # 
+        # Cold State (initial condition) data
+        self.cold_state = cold_state
 
         # Geospatial data
         self.geospatial_data = geospatial_data
@@ -286,20 +287,23 @@ class SUMMAWorkflow(object):
         # elements as part of the __repr__
         if self.riv is not None:
             riv_count = len(self.riv)
-            riv_str = f"Rivers: {riv_count} "
+            riv_str = f"Rivers segments: {riv_count} "
         else:
-            riv_str = f"Rivers: no river network"
+            riv_str = f"Rivers segments: no river network"
         # consider the numbers of `topology['cat']` and
         # `topology['hru']` elements as their __repr__
         cat_count = len(self.cat)
         hru_count = len(self.hru)
         # build strings
-        cat_str = f"GRUs: {cat_count}"
-        hru_str = f"HRUs: {hru_count}"
+        cat_str = f"GRU count: {cat_count}"
+        hru_str = f"HRU count: {hru_count}"
         topology_str = cat_str + '\n' + hru_str + '\n' + riv_str
 
         # object's status
-        status = f"Initialized: {self.init}"
+        if self.init:
+            status = f"Initialized: {self.init}"
+        else:
+            status = f"Initialized: False"
 
         # final string representation is a summary of
         # forcing and topology
@@ -318,6 +322,7 @@ class SUMMAWorkflow(object):
         # We use `self.gru` to build the `gru` variable values
         # the keys to `variables` is mandated by `utils._init_empty_ds`
         # function
+        self.init.append('attrs')
 
         # FIXME: this is a terrible way of doing things, `gru` and `riv`
         #        should be taken care of by Hydrant, and `hru` should be
@@ -337,7 +342,7 @@ class SUMMAWorkflow(object):
         # attributes
         self.attrs = _init_empty_ds(
             variables=variables,
-            dims=default_dims)
+            dims=default_dims) # global variable imported from ._default_dicts
 
         # populating with necessary information obtained upon
         # instantiation; This class variable is a combination of
@@ -550,6 +555,9 @@ class SUMMAWorkflow(object):
         - Only NetCDF files are supported as inputs.
  
         """
+        # Modify the init message
+        self.init.append('forcing')
+
         # If the timezone is not provided, hard-coded assumption to `local`
         if self._forcing_attrs['forcing_time_zone']:
             _forcing_tz = self._forcing_attrs['forcing_time_zone'].lower()
@@ -591,6 +599,8 @@ class SUMMAWorkflow(object):
             # Change object's `time` encoding
             ds.time.encoding = {}
             ds.time.encoding = SUMMAWorkflow._specify_time_encodings(ds.time)
+            
+            # Specify 
 
             # Rename variables
             ds = ds.rename_vars(self.forcing_vars)
@@ -633,15 +643,106 @@ class SUMMAWorkflow(object):
         else:
             return
 
-    def init_coldstate(
+    def init_cold_state(
         self,
         return_ds: bool = False,
     ) -> Optional[xr.Dataset]:
         """Creating self.coldstate and optionally returning it
         """
+        # Modify init repr string
+        self.init.append('cold_state')
+        # local variables for easier access
+        _layer_keys = ('layer', 'layers')
+        _state_keys = ('state', 'states')
+        
+        # Check if necessary keys are provided
+        for key in self.cold_state.keys():
+            if key.lower() in _layer_keys:
+                layers = self.cold_state[key.lower()]
+            elif key.lower() in _state_keys:
+                states = self.cold_state[key.lower()]
+            else:
+                raise IndexError(f"Invalid key `{key}` in `cold_state` dictionary."
+                    " Check documentations at summaflow.readthedocs.io for "
+                    "valid options.")
+        layers = self.cold_state['layers']
+        states = self.cold_state['states']
+
+        # Check if the minimum information is provided
+        ## In `layers`
+        _layers_needed_keys = {'nsoil', 'nsnow'}
+        _layers_provided_keys = set(k.lower() for k in layers.keys())
+        if _layers_needed_keys != _layers_provided_keys:
+            raise IndexError("Missing key in `cold_state` layers. "
+                " Check documentations at summaflow.readthedocs.io for "
+                "valid options.")
+        ## & `states`
+        _states_needed_keys = {'mlayerdepth'}
+        _states_provided_keys = set(k.lower() for k in states.keys())
+        # Find the intersection of needed keys and what has been provided
+        if not _states_needed_keys & _states_provided_keys:
+            raise IndexError("Missing/invalid keys in `cold_state` state variables "
+                "to define `mLayerDepth`. Check documentations at "
+                "summaflow.readthedocs.io for valid options.")
+        
+        # If the sum of `nSoil` and `nSnow` is not greater than 1, raise
+        # an exception
+        if sum([layers['nSoil'], layers['nSnow']]) < 1:
+            raise ValueError("At least 1 layer of `nSoil` is needed.")
+        if int(layers['nSoil']) < 1:
+            raise ValueError("At least 1 layer of `nSoil` is needed.")
+
+        # Check the dtype of layers
+        _vars = ['nSoil', 'nSnow']
+        for _v in _vars:
+            if not isinstance(layers[_v], (int, float)):
+                raise TypeError(f"`{_v}` value must be a number.")
+
+        # `iLayerHeight` need be calculated based on `mLayerDepth`
+        ilayerheight = [float(0)] + list(itertools.accumulate(states['mLayerDepth']))
+
+        # Calculating dimensions based on the inputs
+        # FIXME: `nSoil` and `nSnow` should not be hardcoded below
+        ## `midToto`: mid layer indices of all soil plus snow layers
+        mid_toto = np.arange(int(layers['nSoil']) + int(layers['nSnow']))
+        ## `midSoil`: mid layer indices of all soil layers
+        mid_soil = np.arange(int(layers['nSoil']))
+        ## `ifcToto`: interfaces between all layers in the combined soil
+        ##            and snow profile (including top and bottom)
+        ifc_toto = np.arange(int(layers['nSoil']) + int(layers['nSnow']) + 1)
+        ## `scalarv`: scalar variables and parameters (degenerate dimension)
+        ##            hard-coded to 1
+        scalarv = np.arange(1)
+
+        # Defining basic dimensions and variables for the file
+        gru_fid = self.topology_attrs.get('gru_fid')
+        hru_fid = self.topology_attrs.get('hru_fid')
+        cold_state_coords = {
+            'hru': self.hru[hru_fid],
+            'midSoil': mid_soil,
+            'midToto': mid_toto,
+            'ifcToto': ifc_toto,
+            'scalarv': scalarv,
+        }
+        # Length of HRUs provided
+        _hru_len = len(self.hru[hru_fid])
+        # Variables for the cold state object
+        cold_state_variables = {
+            'hruId': ('hru', self.hru[hru_fid]),
+            'dt_init': (('scalarv', 'hru'), [[3600] * _hru_len]),
+            'nSoil': (('scalarv', 'hru'), [[layers['nSoil']] * _hru_len]),
+            'nSnow': (('scalarv', 'hru'), [[layers['nSnow']] * _hru_len]),
+        }
+
+        # Creating an empty xarray.Dataset for the file
+        self.cold_state = xr.Dataset(
+            data_vars=cold_state_variables,
+            coords=cold_state_coords,
+            attrs=cold_state_local_attrs_default,
+        )
 
         if return_ds:
-            return self.coldstate
+            return self.cold_state
         else:
             return
 

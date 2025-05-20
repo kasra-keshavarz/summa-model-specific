@@ -58,7 +58,6 @@ def _init_empty_ds(
     if not isinstance(dims, dict):
         raise TypeError("dims must be a dictionary")
 
-
     # validate input
     if not all(k in variables for k in ['gru', 'hru']):
         raise ValueError("variables must contain both 'gru' and 'hru' keys")
