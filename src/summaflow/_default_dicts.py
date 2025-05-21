@@ -1,5 +1,6 @@
 """
-Default dictionaries
+Default dictionaries mainly to define local and global attributes of
+NetCDF files (xarray.Dataset objects).
 """
 
 from .__about__ import (
@@ -10,22 +11,26 @@ from .__about__ import (
 attributes_global_attrs_default = {
     'author': 'University of Calgary',
     'license': 'GNU General Public License v3 (or any later version)',
-    'purpose': ("Created by SUMMA automated configuration scripts (SUMMAFlow)"
-        f" {__version__}"),
+    'workflow': ("Created by SUMMA automated configuration scripts (SUMMAFlow)"
+        f" version {__version__}"),
 }
 
 attributes_local_attrs_default = {
     'hruId': {
         'long_name': 'Index of hydrological response unit (HRU)',
+        'units': 'dimensionless',
         },
     'gruId': {
         'long_name': 'Index of grouped response unit (GRU)',
+        'units': 'dimensionless',
         },
     'hru2gruId': {
         'long_name': 'Index of GRU to which the HRU belongs',
+        'units': 'dimensionless',
         },
     'downHRUindex': {
         'long_name': 'Index of downslope HRU (0 = basin outlet)',
+        'units': 'dimensionless',
         },
     'longitude': {
        'long_name': 'Longitude of HRUs centroid',
@@ -45,18 +50,22 @@ attributes_local_attrs_default = {
         },
     'tan_slope': {
         'long_name': 'Average tangent slope of HRU',
+        'units': 'dimensionless',
         },
     'contourLength': {
         'long_name': 'Contour length of HRU',
         },
     'slopeTypeIndex': {
         'long_name': 'Index defining slop',
+        'units': 'dimensionless',
         },
     'soilTypeIndex': {
         'long_name': 'Index defining soil type',
+        'units': 'dimensionless',
         },
     'vegTypeIndex': {
         'long_name': 'Index defining vegetation type',
+        'units': 'dimensionless',
         },
     'mHeight': {
         'long_name': 'Measurement height above bare ground',
@@ -67,6 +76,7 @@ attributes_local_attrs_default = {
 cold_state_local_attrs_default = {
     'hruId': {
         'long_name': 'Index of hydrological response unit (HRU)',
+        'units': 'dimensionless',
         },
     'dt_init': {
         'long_name': 'Time step size of forcing data',
@@ -146,10 +156,10 @@ cold_state_local_attrs_default = {
 cold_state_global_attrs_default = {
     'author': 'University of Calgary',
     'license': 'GNU General Public License v3 (or any later version)',
-    'purpose': (
-        'Create a cold state .nc file for initial SUMMA runs; ',
-        'Created by SUMMA automated configuration scripts (SUMMAFlow) ',
-        'f{__about__.version}'
+    'workflow': (
+        'Create a cold state .nc file for initial SUMMA runs; '
+        'Created by SUMMA automated configuration scripts (SUMMAFlow) '
+        f'version {__version__}'
         ),
 }
 
@@ -157,6 +167,7 @@ cold_state_global_attrs_default = {
 trial_params_local_attrs_default = {
     'hruId': {
         'long_name': 'Index of hydrological response unit (HRU)',
+        'units': 'dimensionless',
         },
 }
 
@@ -164,20 +175,15 @@ trial_params_local_attrs_default = {
 trial_params_global_attrs_default = {
     'author': 'University of Calgary',
     'license': 'GNU General Public License v3 (or any later version)',
-    'purpose': (
-        'Create a trial parameter .nc file for initial SUMMA runs; ',
-        'Created by SUMMA automated configuration package (SUMMAFlow) ',
-        'f{__about__.version}'
+    'workflow': (
+        'Create a trial parameter .nc file for initial SUMMA runs; '
+        'Created by SUMMA automated configuration package (SUMMAFlow) '
+        f'version {__version__}'
         ),
 }
 
 
 forcing_local_attrs_default = {
-    'time': {
-        'long_name': 'time',
-        'standard_name': 'time',
-        'calendar': 'gregorian',
-        },
     'latitude': {
         },
     'longitude': {
@@ -204,12 +210,11 @@ forcing_local_attrs_default = {
 
 
 forcing_global_attrs_default = {
-    'Conventions': 'CF-1.6',
     'author': 'University of Calgary',
     'license': 'GNU General Public License v3 (or any later version)',
-    'purpose': (
-        'Created by SUMMA automated configuration package (SUMMAFlow) ',
-        'f{__about__.version}'
+    'workflow': (
+        'Created by SUMMA automated configuration package (SUMMAFlow) '
+        f'version {__version__}'
         ),
 }
 

@@ -26,13 +26,12 @@ from typing import (
 
 # built-in libraries
 import re
-import json
-import sys
 import glob
 import os
 import shutil
 import pathlib
 import warnings
+import math
 import itertools
 
 # internal package imports
@@ -52,6 +51,7 @@ from .utils import (
     _calculate_centroids,
     _calculate_polygon_areas,
     _freq_longname,
+    _freq_seconds,
 )
 from .geospatial import (
     GeoLayer,
@@ -100,6 +100,8 @@ class SUMMAWorkflow(object):
         geospatial_data: Optional[Dict[str, Dict]] = None,
         dims: Optional[Dict[str, str]] = default_dims,
         settings: Dict[str, Any] = {},
+        *args,
+        **kwargs,
     ) -> None:
 
         """
@@ -243,6 +245,17 @@ class SUMMAWorkflow(object):
 
         # Pint unit registry
         self._ureg = pint.UnitRegistry(force_ndarray_like=True)
+        
+        # Auxillary data dictionary for intermediate important information
+        if 'auxillary' in kwargs.keys():
+            self.auxillary = kwargs['auxillary']
+        else:
+            self.auxillary = {}
+
+        # If `dt_init` not in `auxillary`, warn defaulting to forcing time-step
+        if 'dt_init' not in self.auxillary:
+            warnings.warn("`dt_init` not provided in auxillary dictionary;"
+                " defaulting to forcing time-step.")
 
         return
 
@@ -600,7 +613,9 @@ class SUMMAWorkflow(object):
             ds.time.encoding = {}
             ds.time.encoding = SUMMAWorkflow._specify_time_encodings(ds.time)
             
-            # Specify 
+            # Specify the `dt_time` or time-step period in seconds
+            if 'dt_init' not in self.auxillary.keys():
+                self.auxillary['dt_init'] = _freq_seconds(pd.infer_freq(ds.time))
 
             # Rename variables
             ds = ds.rename_vars(self.forcing_vars)
@@ -622,6 +637,15 @@ class SUMMAWorkflow(object):
                 ds = ds.assign_coords({
                    'time': ds.time.to_index().tz_localize(forcing_tz).tz_convert(target_tz).tz_localize(None)
                 })
+            # Updating local attributes 
+            # Assign attributes to each variable
+            for var_name, attrs in forcing_local_attrs_default.items():
+                if var_name in ds:
+                    ds[var_name].attrs.update(attrs)
+            # Updating global attributes
+            ds = ds.assign_attrs(
+                forcing_global_attrs_default
+            )
 
             # Create the output directory for forcing files
             os.makedirs(os.path.join(self.settings['model_path'], 'forcing'), exist_ok=True)
@@ -654,7 +678,7 @@ class SUMMAWorkflow(object):
         # local variables for easier access
         _layer_keys = ('layer', 'layers')
         _state_keys = ('state', 'states')
-        
+ 
         # Check if necessary keys are provided
         for key in self.cold_state.keys():
             if key.lower() in _layer_keys:
@@ -684,7 +708,7 @@ class SUMMAWorkflow(object):
             raise IndexError("Missing/invalid keys in `cold_state` state variables "
                 "to define `mLayerDepth`. Check documentations at "
                 "summaflow.readthedocs.io for valid options.")
-        
+ 
         # If the sum of `nSoil` and `nSnow` is not greater than 1, raise
         # an exception
         if sum([layers['nSoil'], layers['nSnow']]) < 1:
@@ -726,19 +750,64 @@ class SUMMAWorkflow(object):
         }
         # Length of HRUs provided
         _hru_len = len(self.hru[hru_fid])
-        # Variables for the cold state object
+        # Variables for the cold state object;
+        # FIXME: `nSoil` and `nSnow` should be also processed like the state 
+        #        variable
         cold_state_variables = {
             'hruId': ('hru', self.hru[hru_fid]),
-            'dt_init': (('scalarv', 'hru'), [[3600] * _hru_len]),
+            'dt_init': (('scalarv', 'hru'), [[self.auxillary['dt_init']] * _hru_len]),
             'nSoil': (('scalarv', 'hru'), [[layers['nSoil']] * _hru_len]),
             'nSnow': (('scalarv', 'hru'), [[layers['nSnow']] * _hru_len]),
         }
+
+        # Additional `state` variables added by users
+        for var in states.keys():
+            # make an array out of the input variables
+            value = np.asarray(states[var])
+
+            # Specify dimensions
+            dim_one = SUMMAWorkflow._cold_state_dim(var)
+            dims = (dim_one, 'hru')
+            dims_lengths = [len(cold_state_coords[dim]) for dim in dims]
+
+            # if shape is zero, meaning a 0-dimensional array, make it 
+            # one dimensional
+            if value.ndim == 0:
+                value = np.array([value])
+            elif value.ndim == 1 or value.ndim == 2:
+                value = np.asarray(value)
+            else:
+                raise ValueError("Currently 1- or 2-dimensional array-like objects "
+                    "are supported.")
+
+            # Checking if the length of given array matches any of its
+            # dimensions first
+            matched = [v for v in dims_lengths if v in value.shape]
+            if matched:
+                matched_prod = math.prod(matched)
+            else:
+                matched_prod = 1
+
+            repeated_value = np.repeat(value, math.prod(dims_lengths) / matched_prod)
+            repeated_value = repeated_value.reshape(dims_lengths)
+            repeated_value = repeated_value.astype(float)
+
+            cold_state_variables[var] = (dims, repeated_value)
 
         # Creating an empty xarray.Dataset for the file
         self.cold_state = xr.Dataset(
             data_vars=cold_state_variables,
             coords=cold_state_coords,
-            attrs=cold_state_local_attrs_default,
+        )
+
+        # Updating local attributes 
+        # Assign attributes to each variable
+        for var_name, attrs in cold_state_local_attrs_default.items():
+            if var_name in self.cold_state:
+                self.cold_state[var_name].attrs.update(attrs)
+        # Updating global attributes
+        self.cold_state = self.cold_state.assign_attrs(
+            cold_state_global_attrs_default
         )
 
         if return_ds:
@@ -747,6 +816,47 @@ class SUMMAWorkflow(object):
             return
 
     # static methods
+    @staticmethod
+    def _cold_state_dim(
+        var: str,
+    ) -> str:
+        """Specify the cold state file dimensions to be used for the selected
+        state variable of the model
+
+        Parameters
+        ----------
+        var: str
+            The state variable name
+
+        Returns
+        -------
+        dim: str
+            The proper first dimension name of the state variable. The second
+            dimension is always `hru`, therefore, has not been processed here.
+
+        Raises
+        ------
+        TypeError
+            If `var` is not of type ``str``
+        """
+        if not isinstance(var, str):
+            raise TypeError(f'Invalid `{var}` variable type. It must be of '
+                'data type string.')
+        if var.lower().startswith('mlayer'):
+            return 'midToto'
+        elif var.lower().startswith('ilayer'):
+            return 'ifcToto'
+        elif var.lower().startswith('scalar'):
+            return 'scalarv'
+        elif var.lower() == 'nsoil':
+            return 'scalarv'
+        elif var.lower() == 'nsnow':
+            return 'scalarv'
+        elif var.lower() == 'dt_init':
+            return 'scalarv'
+        else:
+            raise ValueError
+
     @staticmethod
     def _unit_change(
         ds: xr.Dataset,

@@ -7,11 +7,17 @@ FIXME: Technically, the tools used here can be generalized for
 # third-party libraries
 import xarray as xr
 import geopandas as gpd
+import pandas as pd
+
 import pint_pandas
+
 # specifics from third-party libraries 
 from shapely.geometry import Polygon
 from pyproj import CRS
 from pint import UnitRegistry
+from pandas.tseries.frequencies import (
+    to_offset
+)
 
 # built-in imports
 from collections import (
@@ -358,7 +364,7 @@ def nonunique_dict_values(
     return dict_of_non_unique_values
 
 def _freq_longname(
-    freq_alias: 'str'
+    freq_alias: str
 ) -> str:
     """Returning fullname of a offset alias based on pandas conventions.
 
@@ -392,3 +398,25 @@ def _freq_longname(
                          " acceptable.")
 
     return
+
+def _freq_seconds(
+    freq: str
+) -> str:
+    """Returning the total number of seconds of a time interval
+
+    Parameters
+    ----------
+    freq: str
+        Time offset alias which is usually a single accompanied by a digit
+        to represent time interval
+
+    Returns
+    -------
+    int
+        The total seconds of the time interval
+    """
+    # Routine checks
+    if not isinstance(freq, str):
+        raise TypeError(f"Invalid frequency value of `{freq}`.")
+
+    return int(pd.to_timedelta(to_offset(freq)).total_seconds())
