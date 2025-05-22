@@ -1,33 +1,28 @@
 """Geospatial related workflows"""
 # 3rd party libraries
-import pandas as pd
-import numpy as np
-import geopandas as gpd
-
-import pint
-import pint_pandas
-
 # built-in libraries
 import os
 import re
 import warnings
-from typing import (
-    Optional,
-    Dict,
-    Set,
-    Self,
-    Mapping,
-    Any,
-    List,
-    Union,
+from collections import (
+    OrderedDict,
 )
 from collections.abc import (
     Sequence,
 )
-from collections import (
-    Counter,
-    OrderedDict,
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Self,
 )
+
+import geopandas as gpd
+import numpy as np
+import pandas as pd
+import pint
+import pint_pandas
 
 # import internal functions
 from . import utils
@@ -77,12 +72,11 @@ STATS_DIMENSIONLESS = {
     'frac',
     'count',
     'coefficient_of_variation',
-    'count',
 }
 STATS_WITHOUT_UNITS = STATS_DIMENSIONLESS
 
 
-class Stats(object):
+class Stats:
     """Stats used in the workflows and relevant methods defined
 
     Attributes
@@ -323,7 +317,7 @@ class Stats(object):
 
         # Align the mask with mask_series (since they share the same index)
         aligned_mask = mask[mask_series.index]
- 
+
         # Apply the mask to mask_series and sum the remaining values
         return mask_series[aligned_mask]
 
@@ -363,7 +357,7 @@ class Stats(object):
         # If more than one argument is entered, throw an IndexError
         if isinstance(item, tuple) and len(item) > 1:
             raise IndexError("Too many indices provided.")
- 
+
         # Aliases for `frac` and `q`
         # For users with less knowledge of the whole thing
         aliases = {
@@ -423,8 +417,7 @@ class Stats(object):
 
         # add the relevant columns of stats to the `.data`
         self.data = pd.concat([self.data, df], axis=1)
- 
-        return
+
 
     def __repr__(
         self: Self,
@@ -621,13 +614,13 @@ class Stats(object):
         # Set to keep track of what stats have been updated
         # Since this function may be called after changing `frac` values, the
         # set contains it to begin with.
-        _updated_stats = {'frac'} 
+        _updated_stats = {'frac'}
 
         # Extract _classes to calculate new `mean` values - just as a
         # precautionary measure not to mess things up; otherwise, self.classes
         # is available
         _classes = Stats.__convert_list_dtype([Stats.__regex_extract_frac(c)
-                                                  for c in self['frac'].columns]) 
+                                                  for c in self['frac'].columns])
         # Convert `_classes` to pandas.Series to ease multiplications
         _classes = pd.Series(_classes, index=self['frac'].columns)
 
@@ -709,7 +702,6 @@ class Stats(object):
 
         # Check stats that are dependent on `count`
         if 'count' in self.stats_info:
-            pass
             # _updated_stats.add('count')
             # Calculate new `count`
 
@@ -779,7 +771,7 @@ class Stats(object):
             _threshold_classes = _average.index[_average >= threshold]
 
             # Resemble a mapping dictionary
-            _threshold_classes = [Stats.__regex_extract_frac(c) 
+            _threshold_classes = [Stats.__regex_extract_frac(c)
                                       for c in _threshold_classes]
             _psuedo_mapping = {k: None for k in _threshold_classes}
 
@@ -800,7 +792,7 @@ class Stats(object):
             raise ValueError("`frac_threshold` cannot be set without `frac` stats.")
 
 
-class GeoLayer(object):
+class GeoLayer:
     """GeoLayer defining geospatial data as a subclass of Stats
 
     Attributes
@@ -862,7 +854,6 @@ class GeoLayer(object):
         # Assign first instance unit
         self._unit = self._ureg(unit).units
 
-        return
 
     # class methods
     @classmethod
@@ -949,7 +940,7 @@ class GeoLayer(object):
 
         # If everything is OK
         return series.pint.to(target_unit)
-        
+
     @staticmethod
     def remove_unit(
         series: pd.Series,
@@ -966,7 +957,7 @@ class GeoLayer(object):
         self: Self,
     ) -> pint.Unit:
         """GeoLayer's Pint unit"""
-        # report unit of the layer 
+        # report unit of the layer
         return self._unit
 
     @unit.setter
@@ -985,7 +976,6 @@ class GeoLayer(object):
         # turn into a Pint.Unit object
         self._unit = self._ureg(unit_value).units
 
-        return
 
     @property
     def engine(
@@ -1009,7 +999,6 @@ class GeoLayer(object):
 
         self._engine = _engine
 
-        return
 
     # Object's methods
     def plot(
@@ -1095,7 +1084,7 @@ class GeoLayer(object):
         # Change the `stats.data` value
         if inplace:
             self.stats.data = _temp_data
-        
+
         # Change the self.unit attribute
         self.unit = target_unit
 

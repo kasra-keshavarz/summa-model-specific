@@ -4,65 +4,61 @@ be set up using a JSON configuration file, a Command Line Interface (CLI),
 directly inside a Python script/environment, or other commonly used
 configuration interfaces
 """
-import pandas as pd
-import numpy as np
-import geopandas as gpd
-import xarray as xr
-
-import pint_xarray
-import pint
-import pytz
-
-from typing import (
-    Dict,
-    Sequence,
-    Union,
-    Any,
-    Self,
-    Optional,
-    Tuple,
-    TypeAlias,
-)
 
 # Built-in libraries
-import re
-import glob
-import os
-import shutil
-import pathlib
-import warnings
-import math
 import itertools
+import math
+import os
+import pathlib
+import shutil
+import warnings
 
+from importlib.resources import files, as_file
+
+from typing import (
+    Any,
+    Dict,
+    Optional,
+    Self,
+    Sequence,
+    Tuple,
+    TypeAlias,
+    Union,
+)
+
+# 3rd party libraries
+import geopandas as gpd
+import numpy as np
+import pandas as pd
+import pint
+import pytz
+import xarray as xr
+
+# Internal package imports
+from . import utils  # ./utils.py file
+from ._default_dicts import (
+    attributes_global_attrs_default,
+    attributes_local_attrs_default,
+    cold_state_global_attrs_default,
+    cold_state_local_attrs_default,
+    default_dims,
+    forcing_global_attrs_default,
+    forcing_local_attrs_default,
+)
+from .geospatial import (
+    GeoLayer,
+)
+
+# Type definitions
+# Path type
 try:
     from os import PathLike
 except ImportError:  # for Python < 3.6
     PathLike = str
-
-# Internal package imports
-from ._default_dicts import (
-    attributes_global_attrs_default,
-    attributes_local_attrs_default,
-    cold_state_local_attrs_default,
-    cold_state_global_attrs_default,
-    trial_params_local_attrs_default,
-    trial_params_global_attrs_default,
-    forcing_local_attrs_default,
-    forcing_global_attrs_default,
-    default_dims,
-)
-
-from . import utils # ./utils.py file
-
-from .geospatial import (
-    GeoLayer,
-    Stats,
-)
-
-# Type definitions
+# GIS object FID type
 FIDType: TypeAlias = Union[str, int, float]
 
-class SUMMAWorkflow(object):
+class SUMMAWorkflow:
     """
     Main workflow class of SUMMA
 
@@ -203,7 +199,7 @@ class SUMMAWorkflow(object):
         self._forcing_attrs = forcing_attrs
         self.forcing_units = forcing_unit_mapping
         self.forcing_to_units = forcing_to_unit_mapping
- 
+
         # topology data
         # `riv` is optional, as single-site configurations, do not have
         # any river systems involved
@@ -243,7 +239,7 @@ class SUMMAWorkflow(object):
 
         # Pint unit registry
         self._ureg = pint.UnitRegistry(force_ndarray_like=True)
-        
+
         # Auxillary data dictionary for intermediate important information
         if 'auxillary' in kwargs.keys():
             self.auxillary = kwargs['auxillary']
@@ -258,7 +254,6 @@ class SUMMAWorkflow(object):
             warnings.warn("`dt_init` not provided in auxillary dictionary;"
                 " defaulting to forcing time-step.")
 
-        return
 
     # custom constructors
     @classmethod
@@ -303,7 +298,7 @@ class SUMMAWorkflow(object):
             riv_count = len(self.riv)
             riv_str = f"Rivers segments: {riv_count} "
         else:
-            riv_str = f"Rivers segments: no river network"
+            riv_str = "Rivers segments: no river network"
         # consider the numbers of `topology['cat']` and
         # `topology['hru']` elements as their __repr__
         cat_count = len(self.cat)
@@ -317,7 +312,7 @@ class SUMMAWorkflow(object):
         if self.auxillary['init']:
             status = f"Initialized: {self.auxillary['init']}"
         else:
-            status = f"Initialized: False"
+            status = "Initialized: False"
 
         # final string representation is a summary of
         # forcing and topology
@@ -403,7 +398,7 @@ class SUMMAWorkflow(object):
         #     to be read from the input objects.
         _slope_type_index_name = 'slopeTypeIndex'
         self.attrs[_slope_type_index_name] = SUMMAWorkflow._slope_type_index(
-            slope_value=int(1),
+            slope_value=1,
             elements=self.hru,
             element_name=self.dims['hru'])
 
@@ -546,11 +541,11 @@ class SUMMAWorkflow(object):
             _veg_name: veg,
             _soil_name: soil
         }
- 
+
         # Adding Geospatial layers to `self.attrs`
         self.attrs.update(_geolayers)
 
-        # Updating local attributes 
+        # Updating local attributes
         # Assign attributes to each variable
         for var_name, attrs in attributes_local_attrs_default.items():
             if var_name in self.attrs:
@@ -565,7 +560,7 @@ class SUMMAWorkflow(object):
             ds=self.attrs,
             save=save,
             save_path=save_path
-        )    
+        )
 
         if return_ds:
             return self.attrs
@@ -645,7 +640,7 @@ class SUMMAWorkflow(object):
             # Change object's `time` encoding
             ds.time.encoding = {}
             ds.time.encoding = SUMMAWorkflow._specify_time_encodings(ds.time)
- 
+
             # Specify the `dt_time` or time-step period in seconds
             if 'dt_init' not in self.auxillary.keys():
                 self.auxillary['dt_init'] = utils._freq_seconds(pd.infer_freq(ds.time))
@@ -670,7 +665,7 @@ class SUMMAWorkflow(object):
                 ds = ds.assign_coords({
                    'time': ds.time.to_index().tz_localize(forcing_tz).tz_convert(target_tz).tz_localize(None)
                 })
-            # Updating local attributes 
+            # Updating local attributes
             # Assign attributes to each variable
             for var_name, attrs in forcing_local_attrs_default.items():
                 if var_name in ds:
@@ -736,7 +731,7 @@ class SUMMAWorkflow(object):
         # local variables for easier access
         _layer_keys = ('layer', 'layers')
         _state_keys = ('state', 'states')
- 
+
         # Check if necessary keys are provided
         for key in self.cold_state_data.keys():
             if key.lower() in _layer_keys:
@@ -766,7 +761,7 @@ class SUMMAWorkflow(object):
             raise IndexError("Missing/invalid keys in `cold_state` state variables "
                 "to define `mLayerDepth`. Check documentations at "
                 "summaflow.readthedocs.io for valid options.")
- 
+
         # If the sum of `nSoil` and `nSnow` is not greater than 1, raise
         # an exception
         if sum([layers['nSoil'], layers['nSnow']]) < 1:
@@ -809,7 +804,7 @@ class SUMMAWorkflow(object):
         # Length of HRUs provided
         _hru_len = len(self.hru[hru_fid])
         # Variables for the cold state object;
-        # FIXME: `nSoil` and `nSnow` should be also processed like the state 
+        # FIXME: `nSoil` and `nSnow` should be also processed like the state
         #        variable
         cold_state_variables = {
             'hruId': ('hru', self.hru[hru_fid]),
@@ -828,7 +823,7 @@ class SUMMAWorkflow(object):
             dims = (dim_one, 'hru')
             dims_lengths = [len(cold_state_coords[dim]) for dim in dims]
 
-            # if shape is zero, meaning a 0-dimensional array, make it 
+            # if shape is zero, meaning a 0-dimensional array, make it
             # one dimensional
             if value.ndim == 0:
                 value = np.array([value])
@@ -858,7 +853,7 @@ class SUMMAWorkflow(object):
             coords=cold_state_coords,
         )
 
-        # Updating local attributes 
+        # Updating local attributes
         # Assign attributes to each variable
         for var_name, attrs in cold_state_local_attrs_default.items():
             if var_name in self.cold_state:
@@ -882,6 +877,33 @@ class SUMMAWorkflow(object):
             return self.cold_state
         else:
             return
+
+    def init_template(
+        self,
+        save: bool = False,
+        save_path: Optional[PathLike | str] = None,
+    ) -> None:
+        """Copying template files for SUMMA runs"""
+        if save:
+            os.makedirs(save_path, exist_ok=True)
+ 
+            try:
+                package_root = files('summaflow')
+                data_dir_path = package_root.joinpath('../../data')
+ 
+                if not data_dir_path.is_dir():
+                    raise FileNotFoundError('Data directory `data` not found.'
+                        ' Make sure the package is installed properly.')
+
+                for item in data_dir_path.iterdir():
+                    if item.is_file():
+                        with as_file(item) as src_path:
+                            shutil.copy2(src_path, os.path.join(save_path, item.name))
+
+            except Exception as e:
+                raise RuntimeError(f"Failed to copy package data: {str(e)}")
+
+        return
 
     def _save_ds(
         self,
@@ -912,7 +934,6 @@ class SUMMAWorkflow(object):
         else: # for legibility
             pass
 
-        return
 
     # static methods
     @staticmethod
@@ -945,13 +966,7 @@ class SUMMAWorkflow(object):
             return 'midToto'
         elif var.lower().startswith('ilayer'):
             return 'ifcToto'
-        elif var.lower().startswith('scalar'):
-            return 'scalarv'
-        elif var.lower() == 'nsoil':
-            return 'scalarv'
-        elif var.lower() == 'nsnow':
-            return 'scalarv'
-        elif var.lower() == 'dt_init':
+        elif var.lower().startswith('scalar') or var.lower() == 'nsoil' or (var.lower() == 'nsnow' or var.lower() == 'dt_init'):
             return 'scalarv'
         else:
             raise ValueError
@@ -1002,7 +1017,7 @@ class SUMMAWorkflow(object):
         # If all elements of `variables` not found in `units`,
         # assign them to None
         for v in ds:
-            if v not in units.keys():
+            if v not in units:
                 units[v] = 'dimensionless'
 
         # Now assign the units
@@ -1071,19 +1086,14 @@ class SUMMAWorkflow(object):
         # `local` timezone is ambiguous alone, unless both `forcing` and
         # `target` are set to `local`, trusting user's time manipulations.
         if forcing in ("local") and target not in ("local"):
-            raise ValueError("If forcing time zone is set to `local`, the" 
+            raise ValueError("If forcing time zone is set to `local`, the"
                 " target must necessarily be `local`.")
 
         # If set to `utc` (or `gmt`), go and adjust `forcing`
         # if necessary
         if target in ('utc', 'gmt'):
             # If target and forcing tzs are both UTC, do nothing
-            if forcing in ('utc', 'gmt'):
-                tz_info = 'utcTime'
-
-            # If target is `utc` and forcing is a local tz, convert to
-            # `utc`
-            elif forcing in time_zones:
+            if forcing in ('utc', 'gmt') or forcing in time_zones:
                 tz_info = 'utcTime'
 
             else:
@@ -1112,7 +1122,7 @@ class SUMMAWorkflow(object):
 
         return (forcing, target, tz_info)
 
-    @staticmethod 
+    @staticmethod
     def _specify_time_encodings(
         time_stamps: Sequence[np.datetime64],
     ) -> Dict[str, Dict[str, str]]:
@@ -1332,11 +1342,11 @@ class SUMMAWorkflow(object):
 
         # Create and return the mapping
         mapping = hru.groupby(hru_fid)[mapping_fid].first().to_dict()
- 
+
         # Verify mapping completeness
         if len(mapping) != len(hru):
             raise RuntimeError("Unexpected error in mapping creation - size mismatch")
- 
+
         return mapping
 
     @staticmethod

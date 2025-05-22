@@ -5,34 +5,27 @@ FIXME: Technically, the tools used here can be generalized for
        considered.
 """
 # Third-party libraries
-import xarray as xr
-import geopandas as gpd
-import pandas as pd
-
-import pint_pandas
-
-# Specifics from third-party libraries 
-from shapely.geometry import Polygon
-from pyproj import CRS
-from pint import UnitRegistry
-from pandas.tseries.frequencies import (
-    to_offset
-)
+import os
 
 # Built-in imports
 from collections import (
     Counter,
 )
-
 from typing import (
+    Any,
     Dict,
     Sequence,
-    Any,
     Set,
-    List,
 )
 
-import os
+import geopandas as gpd
+import pandas as pd
+import xarray as xr
+from pandas.tseries.frequencies import to_offset
+from pint import UnitRegistry
+from pyproj import CRS
+
+# Specifics from third-party libraries
 
 try:
     from os import PathLike
@@ -124,17 +117,17 @@ def _calculate_centroids(
         Original GeoDataFrame with centroid columns added. The column labels
         are *centroid_x* and *centroid_y*
     """
-    
+
     gdf = gdf.copy()
-    
+
     # Handle missing CRS
     if gdf.crs is None:
         warnings.warn(f"No CRS provided - assuming {default_crs}", UserWarning)
         gdf = gdf.set_crs(default_crs)
-    
+
     original_crs = gdf.crs
     is_geographic = original_crs.is_geographic
-    
+
     # Calculate centroids with proper projection if needed
     if is_geographic:
         if calculation_crs is None:
@@ -145,7 +138,7 @@ def _calculate_centroids(
                 "For better accuracy, specify a local projection using calculation_crs parameter.",
                 UserWarning
             )
-        
+
         # Project to calculation CRS and calculate centroids
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -153,16 +146,16 @@ def _calculate_centroids(
             centroids = projected.geometry.centroid.to_crs(original_crs)
     else:
         centroids = gdf.geometry.centroid
-    
+
     # Convert to target CRS if different
     if str(original_crs) != str(target_crs):
         centroids = centroids.to_crs(target_crs)
-    
+
     # Add results to DataFrame
     gdf['centroid'] = centroids
     gdf['centroid_x'] = centroids.x
     gdf['centroid_y'] = centroids.y
-    
+
     return gdf
 
 
@@ -240,7 +233,7 @@ def _calculate_polygon_areas(
         result_gdf.crs = 'EPSG:4326'
 
     # Transform to equal area CRS if original is geographic
-    try: 
+    try:
         equal_area_gdf = result_gdf.to_crs(equal_area_crs)
     except pyproj.exceptions.CRSError:
         raise ValueError(f"Failed to transform to equal area CRS: {equal_area_crs}. "
@@ -318,10 +311,10 @@ def unique_dict_values(
     """
     # Count occurrences of all values
     value_counts = Counter(d.values())
- 
+
     # Get the set of unique values (appear exactly once)
     unique_values = {value for value, count in value_counts.items() if count == 1}
- 
+
     # Return keys that map to these unique values
     return {key: value for key, value in d.items() if value in unique_values}
 
@@ -361,7 +354,7 @@ def nonunique_dict_values(
     """
     value_counts = Counter(d.values())
 
-    non_unique_values = {value for value, count in value_counts.items() 
+    non_unique_values = {value for value, count in value_counts.items()
         if count >= 2 and value is not None}
 
     # Create a dictionary referring to repeated values as refer corresponding

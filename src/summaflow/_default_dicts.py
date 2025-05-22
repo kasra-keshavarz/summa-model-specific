@@ -3,10 +3,7 @@ Default dictionaries mainly to define local and global attributes of
 NetCDF files (xarray.Dataset objects).
 """
 
-from .__about__ import (
-    __version__
-)
-
+from .__about__ import __version__
 
 attributes_global_attrs_default = {
     'author': 'University of Calgary',
