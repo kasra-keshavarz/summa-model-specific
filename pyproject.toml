@@ -12,6 +12,10 @@ license = "MIT"
 keywords = []
 authors = [
   { name = "Kasra Farmer", email = "kasra.keshavarz1@ucalgary.ca" },
+  { name = "Darri Eythorsson", email = "darri.eythorsson@ucalgary.ca" },
+  { name = "Mohamed Moghairib", email = "mohamedismaiel.ahmed@ucalgary.ca" },
+  { name = "Wouter Knoben", email = "wouter.knoben@ucalgary.ca" },
+  { name = "Dave Casson", email = "dave.casson@ucalgary.ca" },
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -71,3 +75,11 @@ exclude_lines = [
   "if __name__ == .__main__.:",
   "if TYPE_CHECKING:",
 ]
+
+[tool.setuptools]
+# Include all files tracked by version control
+include-package-data = true
+
+[tool.setuptools.package-data]
+# Explicit file patterns
+"summaflow" = ["data/*.TBL", "data/*.txt"]
