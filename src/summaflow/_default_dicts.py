@@ -94,7 +94,7 @@ cold_state_local_attrs_default = {
         'long_name': 'Mass of ice on the vegetation canopy',
         'units': 'kilogram / meter ** 2',
         },
-    'scalarCanopyliq': {
+    'scalarCanopyLiq': {
         'long_name': 'Mass of liquid water on the vegetation canopy',
         'units': 'kilogram / meter ** 2',
         },
@@ -123,8 +123,8 @@ cold_state_local_attrs_default = {
         'units': 'kilogram / meter ** 2',
         },
     'scalarAquiferStorage': {
-        'long_name': '',
-        'units': '',
+        'long_name': 'Relative aquifer storage; above bottom of the soil profile',
+        'units': 'meter',
         },
     'mLayerDepth': {
         'long_name': 'Depth of each layer',

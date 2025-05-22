@@ -24,7 +24,7 @@ from typing import (
     TypeAlias,
 )
 
-# built-in libraries
+# Built-in libraries
 import re
 import glob
 import os
@@ -34,7 +34,12 @@ import warnings
 import math
 import itertools
 
-# internal package imports
+try:
+    from os import PathLike
+except ImportError:  # for Python < 3.6
+    PathLike = str
+
+# Internal package imports
 from ._default_dicts import (
     attributes_global_attrs_default,
     attributes_local_attrs_default,
@@ -46,13 +51,9 @@ from ._default_dicts import (
     forcing_global_attrs_default,
     default_dims,
 )
-from .utils import (
-    _init_empty_ds,
-    _calculate_centroids,
-    _calculate_polygon_areas,
-    _freq_longname,
-    _freq_seconds,
-)
+
+from . import utils # ./utils.py file
+
 from .geospatial import (
     GeoLayer,
     Stats,
@@ -229,11 +230,8 @@ class SUMMAWorkflow(object):
         # Dimension names
         self.dims = dims
 
-        # `init` object to add lazy-like behaviour
-        self.init = []
-
         # Cold State (initial condition) data
-        self.cold_state = cold_state
+        self.cold_state_data = cold_state
 
         # Geospatial data
         self.geospatial_data = geospatial_data
@@ -251,6 +249,9 @@ class SUMMAWorkflow(object):
             self.auxillary = kwargs['auxillary']
         else:
             self.auxillary = {}
+
+        # `init` object to add lazy-like behaviour
+        self.auxillary['init'] = []
 
         # If `dt_init` not in `auxillary`, warn defaulting to forcing time-step
         if 'dt_init' not in self.auxillary:
@@ -313,8 +314,8 @@ class SUMMAWorkflow(object):
         topology_str = cat_str + '\n' + hru_str + '\n' + riv_str
 
         # object's status
-        if self.init:
-            status = f"Initialized: {self.init}"
+        if self.auxillary['init']:
+            status = f"Initialized: {self.auxillary['init']}"
         else:
             status = f"Initialized: False"
 
@@ -328,14 +329,34 @@ class SUMMAWorkflow(object):
     def init_attrs(
         self,
         return_ds: bool = False,
+        save: bool = False,
+        save_path: Optional[PathLike | str] = None,
     ) -> None:
-        """Initialize the necessary objects for the experient"""
+        """Initialize the necessary objects for the experient
+
+        Parameters
+        ----------
+        returns_ds: bool, defaults to `False`
+            Returing the |Dataset| if required.
+        save: bool, defaults to False
+            Saving the resulting |Dataset|.
+        save_path: `PathLike` or `str`
+            Path to save the resulting |Dataset| including the filename.
+
+        Returns
+        -------
+        None
+
+        """
         # variables to build an empty SUMMA-specific `attribute` object
         # since `self.topology_attrs['fid']` assumes to be found in both.
         # We use `self.gru` to build the `gru` variable values
         # the keys to `variables` is mandated by `utils._init_empty_ds`
         # function
-        self.init.append('attrs')
+        if 'attrs' not in self.auxillary['init']:
+            self.auxillary['init'].append('attrs')
+        else:
+            del self.attrs
 
         # FIXME: this is a terrible way of doing things, `gru` and `riv`
         #        should be taken care of by Hydrant, and `hru` should be
@@ -353,7 +374,7 @@ class SUMMAWorkflow(object):
 
         # create an empty xarray.Dataset to be populated with SUMMA-specific
         # attributes
-        self.attrs = _init_empty_ds(
+        self.attrs = utils._init_empty_ds(
             variables=variables,
             dims=default_dims) # global variable imported from ._default_dicts
 
@@ -432,7 +453,7 @@ class SUMMAWorkflow(object):
             'latitude': 'centroid_x',
             'longitude': 'centroid_y',
         }
-        centroids = _calculate_centroids(self.hru)
+        centroids = utils._calculate_centroids(self.hru)
         for k, v in coords_defs.items():
             self.attrs[k] = xr.DataArray(
                 centroids[v],
@@ -445,8 +466,8 @@ class SUMMAWorkflow(object):
         #    includes a column named `area`.
         #    The unit of area is critical, so they have been assigned now;
         #    for all other variables, they are added later.
-        areas = _calculate_polygon_areas(self.hru, target_area_unit='m^2')
-        area_unit = areas['area'].pint.units
+        areas = utils._calculate_polygon_areas(self.hru, target_area_unit='m^2')
+        area_unit = str(areas['area'].pint.units)
         self.attrs['HRUarea'] = xr.DataArray(
             data=areas['area'].pint.magnitude,
             coords={'hru': areas[hru_fid].values},
@@ -539,6 +560,13 @@ class SUMMAWorkflow(object):
             attributes_global_attrs_default
         )
 
+        # Saving if instructed
+        self._save_ds(
+            ds=self.attrs,
+            save=save,
+            save_path=save_path
+        )    
+
         if return_ds:
             return self.attrs
         else:
@@ -547,6 +575,9 @@ class SUMMAWorkflow(object):
     def init_forcing(
         self,
         return_ds: bool = False,
+        save: bool = False,
+        save_nc_path: Optional[PathLike | str] = None,
+        save_list_path: Optional[PathLike | str] = None,
     ) -> Optional[xr.Dataset]:
         """"Prepare forcing dataset for the SUMMA setup.
 
@@ -568,8 +599,12 @@ class SUMMAWorkflow(object):
         - Only NetCDF files are supported as inputs.
  
         """
+        # If instructed to save, paths are necessary
+        if save:
+            if save_nc_path is None or save_list_path is None:
+                raise ValueError("Missing paths to save files.")
         # Modify the init message
-        self.init.append('forcing')
+        self.auxillary['init'].append('forcing')
 
         # If the timezone is not provided, hard-coded assumption to `local`
         if self._forcing_attrs['forcing_time_zone']:
@@ -591,15 +626,13 @@ class SUMMAWorkflow(object):
         # other mechanisms in reading forcing files
 
         # Create the forcing dataset list file
-        list_file = pathlib.Path(os.path.join(
-            self.settings['model_path'],
-            'settings',
-            'SUMMA',
-            'forcingFileList.txt'))
-        # Create parent directories if they don't exist
-        list_file.parent.mkdir(parents=True, exist_ok=True)
-        list_file.touch()
-        list_file.write_text('')
+        if save:
+            list_file = pathlib.Path(save_list_path)
+
+            # Create parent directories if they don't exist
+            list_file.parent.mkdir(parents=True, exist_ok=True)
+            list_file.touch()
+            list_file.write_text('')
 
         # FIXME: Considering Dask/joblib/others for parallelization
         for forcing in self._forcing:
@@ -612,10 +645,10 @@ class SUMMAWorkflow(object):
             # Change object's `time` encoding
             ds.time.encoding = {}
             ds.time.encoding = SUMMAWorkflow._specify_time_encodings(ds.time)
-            
+ 
             # Specify the `dt_time` or time-step period in seconds
             if 'dt_init' not in self.auxillary.keys():
-                self.auxillary['dt_init'] = _freq_seconds(pd.infer_freq(ds.time))
+                self.auxillary['dt_init'] = utils._freq_seconds(pd.infer_freq(ds.time))
 
             # Rename variables
             ds = ds.rename_vars(self.forcing_vars)
@@ -647,19 +680,27 @@ class SUMMAWorkflow(object):
                 forcing_global_attrs_default
             )
 
-            # Create the output directory for forcing files
-            os.makedirs(os.path.join(self.settings['model_path'], 'forcing'), exist_ok=True)
-            # Save forcing file
-            ds.to_netcdf(
-                os.path.join(self.settings['model_path'], 'forcing', filename),
-                format='NETCDF4_CLASSIC',
-                unlimited_dims=['time'])
-            # Create a list of forcing files
-            with list_file.open('a', encoding='utf-8') as f:
-                f.write(f'{filename}\n')
+            # Saving if instructed
+            if save:
+                # Save files
+                self._save_ds(
+                    ds=ds,
+                    save=save,
+                    save_path=os.path.join(save_nc_path, filename),
+                    unlimited_dims=['time'],
+                    nc_format='NETCDF4_CLASSIC',
+                )
+
+                # Create a list of forcing files
+                with list_file.open('a', encoding='utf-8') as f:
+                    f.write(f'{filename}\n')
 
             # Close the dataset
             ds.close()
+
+        # Warn user if files are not being saved
+        if not save:
+            warnings.warn('Forcing files processed without being saved.')
 
         if return_ds:
             # Just a representation---really rough return
@@ -670,27 +711,44 @@ class SUMMAWorkflow(object):
     def init_cold_state(
         self,
         return_ds: bool = False,
+        save: bool = False,
+        save_path: Optional[PathLike | str] = None,
     ) -> Optional[xr.Dataset]:
         """Creating self.coldstate and optionally returning it
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+
+        Raises
+        ------
+
+
         """
         # Modify init repr string
-        self.init.append('cold_state')
+        if 'cold_state' not in self.auxillary['init']:
+            self.auxillary['init'].append('cold_state')
+        else:
+            del self.cold_state
+
         # local variables for easier access
         _layer_keys = ('layer', 'layers')
         _state_keys = ('state', 'states')
  
         # Check if necessary keys are provided
-        for key in self.cold_state.keys():
+        for key in self.cold_state_data.keys():
             if key.lower() in _layer_keys:
-                layers = self.cold_state[key.lower()]
+                layers = self.cold_state_data[key.lower()]
             elif key.lower() in _state_keys:
-                states = self.cold_state[key.lower()]
+                states = self.cold_state_data[key.lower()]
             else:
                 raise IndexError(f"Invalid key `{key}` in `cold_state` dictionary."
                     " Check documentations at summaflow.readthedocs.io for "
                     "valid options.")
-        layers = self.cold_state['layers']
-        states = self.cold_state['states']
+        layers = self.cold_state_data['layers']
+        states = self.cold_state_data['states']
 
         # Check if the minimum information is provided
         ## In `layers`
@@ -810,10 +868,51 @@ class SUMMAWorkflow(object):
             cold_state_global_attrs_default
         )
 
+        # Assure the order of dimensions are similar to that of self.attrs
+        self.cold_state = self.cold_state.reindex(dims=self.attrs.dims)
+
+        # Saving if instructed
+        self._save_ds(
+            ds=self.cold_state,
+            save=save,
+            save_path=save_path
+        )
+
         if return_ds:
             return self.cold_state
         else:
             return
+
+    def _save_ds(
+        self,
+        ds,
+        save,
+        save_path,
+        unlimited_dims: Sequence[str] = None,
+        nc_format: str = 'NETCDF4',
+    ) -> None:
+        """Save the dataset to the defined path"""
+        # Save the file
+        if save:
+            if isinstance(save_path, (PathLike, str)):
+                # Create the directory
+                if utils.is_file(save_path, {'.nc', '.nc4'}):
+                    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                    ds.to_netcdf(
+                        save_path,
+                        format=nc_format,
+                        unlimited_dims=unlimited_dims,
+                    )
+                else:
+                    raise ValueError("File name missing.")
+
+            else:
+                raise TypeError("`save_path` argument must be a PathLike"
+                    " or string object.")
+        else: # for legibility
+            pass
+
+        return
 
     # static methods
     @staticmethod
@@ -1023,7 +1122,7 @@ class SUMMAWorkflow(object):
         # estimate the frequency offset value
         _freq = pd.infer_freq(time_stamps)
         # get the full name
-        _freq_long = _freq_longname(_freq)
+        _freq_long = utils._freq_longname(_freq)
 
         # Encoding dictionary appropriate to be included as a local attribute;
         # The default starting date is hard-coded, as it is a safe date to
@@ -1291,7 +1390,7 @@ class SUMMAWorkflow(object):
             coords={
                 dim_name: layer.stats[stat_names].index.values,
             },
-            attrs={'unit': layer.unit},
+            attrs={'unit': str(layer.unit)},
             name=layer_name,
         )
 

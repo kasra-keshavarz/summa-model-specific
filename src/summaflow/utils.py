@@ -4,14 +4,14 @@ FIXME: Technically, the tools used here can be generalized for
        all models. Due to time limitation, some compromise were
        considered.
 """
-# third-party libraries
+# Third-party libraries
 import xarray as xr
 import geopandas as gpd
 import pandas as pd
 
 import pint_pandas
 
-# specifics from third-party libraries 
+# Specifics from third-party libraries 
 from shapely.geometry import Polygon
 from pyproj import CRS
 from pint import UnitRegistry
@@ -19,16 +19,26 @@ from pandas.tseries.frequencies import (
     to_offset
 )
 
-# built-in imports
+# Built-in imports
 from collections import (
     Counter,
 )
+
 from typing import (
     Dict,
     Sequence,
     Any,
+    Set,
     List,
 )
+
+import os
+
+try:
+    from os import PathLike
+except ImportError:
+    PathLike = str # for Python <3.6
+
 import warnings
 
 
@@ -420,3 +430,19 @@ def _freq_seconds(
         raise TypeError(f"Invalid frequency value of `{freq}`.")
 
     return int(pd.to_timedelta(to_offset(freq)).total_seconds())
+
+def is_file(
+    path: PathLike | str,
+    ext: Set[str],
+) -> bool:
+    """Check if `path` ends in a filename considering the provided extension set"""
+    path = os.fsdecode(path)  # handles PathLike objects too
+    # Only working with lowercase letters
+    path_ext = os.path.splitext(path)[1].lower()
+    ext = set([e.lower() for e in ext])
+
+    if path_ext in ext:
+        return True
+    else:
+        return False
+
