@@ -34,6 +34,8 @@ import pint
 import pytz
 import xarray as xr
 
+from jinja2 import Environment, FileSystemLoader
+
 # Internal package imports
 from . import utils  # ./utils.py file
 from ._default_dicts import (
@@ -44,10 +46,14 @@ from ._default_dicts import (
     default_dims,
     forcing_global_attrs_default,
     forcing_local_attrs_default,
+    trial_params_local_attrs_default,
+    trial_params_global_attrs_default,
+    model_decisions_default,
 )
 from .geospatial import (
     GeoLayer,
 )
+from .__about__ import __version__
 
 # Type definitions
 # Path type
@@ -904,6 +910,99 @@ class SUMMAWorkflow:
                 raise RuntimeError(f"Failed to copy package data: {str(e)}")
 
         return
+
+    def init_trial(
+        self,
+        return_ds: bool = False,
+        save: bool = False,
+        save_path: Optional[PathLike | str] = None,
+    ) -> Optional[xr.Dataset]:
+        """Preparing trialParams.nc file for SUMMA setups.
+        This should ideally facilitate calibration, so the progress made on
+        this front has not been included here."""
+        # Defining basic dimensions and variables for the file
+        hru_fid = self.topology_attrs.get('hru_fid')
+        gru_fid = self.topology_attrs.get('gru_fid')
+
+        # Coordinate variables
+        trial_params_coords = {
+            'hru': self.hru[hru_fid],
+            'gru': self.gru[gru_fid],
+        }
+        # Variables for the trial object;
+        trial_params_variables = {
+            'hruId': ('hru', self.hru[hru_fid]),
+            'gruId': ('hru', self.gru[gru_fid]),
+        }
+
+        # Trial xarray.Dataset object
+        self.trial_params = xr.Dataset(
+            data_vars=trial_params_variables,
+            coords=trial_params_coords,
+        )
+
+        # Updating local attributes
+        # Assign attributes to each variable
+        for var_name, attrs in trial_params_local_attrs_default.items():
+            if var_name in self.trial_params:
+                self.trial_params[var_name].attrs.update(attrs)
+        # Updating global attributes
+        self.trial = self.trial_params.assign_attrs(
+            trial_params_global_attrs_default
+        )
+
+        # If saving instructed
+        if save:
+            self._save_ds(
+                ds=self.trial_params,
+                save=save,
+                save_path=save_path
+            )
+
+        if return_ds:
+            return self.trial_params
+        else:
+            return
+
+    def init_decisions(
+        self,
+        return_dict: bool = False,
+        save: bool = False,
+        save_path: Optional[PathLike | str] = None,
+    ) -> Optional[pd.DataFrame]:
+        """Preparing modelDecisions.txt file for SUMMA setups."""
+
+        def raise_helper(msg):
+            raise Exception(msg)
+
+        package_root = files('summaflow')
+        data_dir_path = package_root.joinpath('templates')
+
+        environment = Environment(
+            loader=FileSystemLoader(data_dir_path),
+            trim_blocks=True,
+            lstrip_blocks=True,
+            line_comment_prefix='##',
+        )
+        environment.globals['raise'] = raise_helper
+ 
+        template = environment.get_template("SUMMA_model_decisions_template.jinja")
+
+        self.decisions = model_decisions_default
+
+        # create content
+        content = template.render(
+            decisions_dict=self.decisions,
+            version=__version__,
+            models='models',
+            comments='comments',
+        )
+
+        if save:
+            pathlib.Path(save_path).write_text(content, encoding='utf-8') 
+
+        if return_dict:
+            return self.decisions
 
     def _save_ds(
         self,
