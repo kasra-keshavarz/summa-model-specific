@@ -61,6 +61,7 @@ try:
     from os import PathLike
 except ImportError:  # for Python < 3.6
     PathLike = str
+
 # GIS object FID type
 FIDType: TypeAlias = Union[str, int, float]
 
@@ -260,6 +261,19 @@ class SUMMAWorkflow:
             warnings.warn("`dt_init` not provided in auxillary dictionary;"
                 " defaulting to forcing time-step.")
 
+        # Jinja2 environment for templating
+        def raise_helper(msg):
+            raise Exception(msg)
+
+        self.package_root = files('summaflow')
+
+        self.jinja2_env = Environment(
+            loader=FileSystemLoader(self.package_root.joinpath('templates')),
+            trim_blocks=True,
+            lstrip_blocks=True,
+            line_comment_prefix='##',
+        )
+        self.jinja2_env.globals['raise'] = raise_helper
 
     # custom constructors
     @classmethod
@@ -619,9 +633,9 @@ class SUMMAWorkflow:
             _target_tz = 'local'
 
         # Specify the `forcing` and `target` timezones and also the string
-        # for the "fileManager"
+        # for the "fileManager" in the axuillary dictionary
         forcing_tz, target_tz, tz_info = SUMMAWorkflow._specify_tz(_forcing_tz, _target_tz)
-        self._forcing_attrs['tz_info'] = tz_info
+        self.auxillary['tz_info'] = tz_info
 
         # File generation is done within this function as SUMMA does not have
         # other mechanisms in reading forcing files
@@ -677,9 +691,7 @@ class SUMMAWorkflow:
                 if var_name in ds:
                     ds[var_name].attrs.update(attrs)
             # Updating global attributes
-            ds = ds.assign_attrs(
-                forcing_global_attrs_default
-            )
+            ds = ds.assign_attrs(forcing_global_attrs_default)
 
             # Saving if instructed
             if save:
@@ -819,6 +831,11 @@ class SUMMAWorkflow:
             'nSnow': (('scalarv', 'hru'), [[layers['nSnow']] * _hru_len]),
         }
 
+        # Since `iLayerHeight` can be calculated from `mLayerDepth`,
+        # if not provided, by the user, we add it to `states` dictionary.
+        if 'iLayerHeight' not in states:
+            states['iLayerHeight'] = ilayerheight
+
         # Additional `state` variables added by users
         for var in states.keys():
             # make an array out of the input variables
@@ -893,21 +910,13 @@ class SUMMAWorkflow:
         if save:
             os.makedirs(save_path, exist_ok=True)
  
-            try:
-                package_root = files('summaflow')
-                data_dir_path = package_root.joinpath('../../data')
- 
-                if not data_dir_path.is_dir():
-                    raise FileNotFoundError('Data directory `data` not found.'
-                        ' Make sure the package is installed properly.')
+        # Using the package root to find the data directory
+        data_dir_path = self.package_root.joinpath('../../data')
 
-                for item in data_dir_path.iterdir():
-                    if item.is_file():
-                        with as_file(item) as src_path:
-                            shutil.copy2(src_path, os.path.join(save_path, item.name))
-
-            except Exception as e:
-                raise RuntimeError(f"Failed to copy package data: {str(e)}")
+        for item in data_dir_path.iterdir():
+            if item.is_file():
+                with as_file(item) as src_path:
+                    shutil.copy2(src_path, os.path.join(save_path, item.name))
 
         return
 
@@ -951,6 +960,9 @@ class SUMMAWorkflow:
             trial_params_global_attrs_default
         )
 
+        # Assure the order of dimensions are similar to that of self.attrs
+        self.trial = self.trial.reindex(dims=self.attrs.dims)
+
         # If saving instructed
         if save:
             self._save_ds(
@@ -971,24 +983,20 @@ class SUMMAWorkflow:
         save_path: Optional[PathLike | str] = None,
     ) -> Optional[pd.DataFrame]:
         """Preparing modelDecisions.txt file for SUMMA setups."""
+        # Jinja2 template for model decisions
+        template = self.jinja2_env.get_template("SUMMA_model_decisions_template.jinja")
 
-        def raise_helper(msg):
-            raise Exception(msg)
-
-        package_root = files('summaflow')
-        data_dir_path = package_root.joinpath('templates')
-
-        environment = Environment(
-            loader=FileSystemLoader(data_dir_path),
-            trim_blocks=True,
-            lstrip_blocks=True,
-            line_comment_prefix='##',
-        )
-        environment.globals['raise'] = raise_helper
- 
-        template = environment.get_template("SUMMA_model_decisions_template.jinja")
-
+        # Reading the default model decisions
         self.decisions = model_decisions_default
+
+        if self.decisions is not None:
+            # If the decisions are provided, update the default ones
+            for key, value in self.decisions.items():
+                if key in model_decisions_default:
+                    model_decisions_default[key] = value
+                else:
+                    raise KeyError(f"Invalid key `{key}` in `decisions` dictionary. "
+                                   "Check the documentation for valid keys.")
 
         # create content
         content = template.render(
@@ -1003,6 +1011,225 @@ class SUMMAWorkflow:
 
         if return_dict:
             return self.decisions
+
+    def run(
+        self,
+        save: bool = True,
+        path: Optional[PathLike | str] = None,
+        **kwargs: Optional[Any],
+    ) -> None:
+        """Preparing fileManager.txt file for SUMMA setups.
+
+        Parameters
+        ----------
+        path: PathLike or str, optional
+            Path to save the fileManager.txt file. If not provided, uses
+            the model_path from settings.
+        kwargs: dict, optional
+            Additional key-value pairs to be included in the fileManager.txt.
+            Valid keys include:
+                - controlVersion
+                - simStartTime
+                - simEndTime
+                - tmZoneInfo
+                - outFilePrefix
+                - settingsPath
+                - forcingPath
+                - outputPath
+                - initConditionFile
+                - attributeFile
+                - trialParamFile
+                - forcingListFile
+                - decisionsFile
+                - outputControlFile
+                - globalHruParamFile
+                - globalGruParamFile
+                - vegTableFile
+                - soilTableFile
+                - generalTableFile
+                - noahmpTableFile
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        TypeError
+            If `path` is not a string or PathLike object.
+        ValueError
+            If `settings['start_date']` or `settings['end_date']` is not provided
+            in the settings dictionary.
+        KeyError
+            If an invalid key is provided in `kwargs`.
+        """
+        # If path is not provided, use the model_path
+        path = self.settings['model_path']
+
+        # Make sure the path exists
+        os.makedirs(path, exist_ok=True)
+
+        # If the path is not a string, raise an error
+        if not isinstance(path, (str, PathLike)):
+            raise TypeError("`path` argument must be a string or PathLike object.")
+
+        # If invalid key is provided in `kwargs`, raise an error
+        valid_keys = {
+            'controlVersion', 'simStartTime', 'simEndTime', 'tmZoneInfo',
+            'outFilePrefix', 'settingsPath', 'forcingPath', 'outputPath',
+            'initConditionFile', 'attributeFile', 'trialParamFile',
+            'forcingListFile', 'decisionsFile', 'outputControlFile',
+            'globalHruParamFile', 'globalGruParamFile', 'vegTableFile',
+            'soilTableFile', 'generalTableFile', 'noahmpTableFile'
+        }
+        if kwargs:
+            invalid_keys = set(kwargs.keys()) - valid_keys
+            if invalid_keys:
+                raise KeyError(f"Invalid keys in `kwargs`: {invalid_keys}. "
+                               "Check the documentation for valid keys.")
+
+        # If `settings.['start_date']` or `settings['end_date']` or not provided,
+        if 'start_date' not in self.settings or 'end_date' not in self.settings:
+            raise ValueError("`settings['start_date']` and "
+                             "`settings['end_date']` must be provided in the "
+                             "settings dictionary.")
+
+        # Initialize attributes
+        self.auxillary['tz_info'] = SUMMAWorkflow._specify_tz(
+            forcing=self._forcing_attrs['forcing_time_zone'],
+            target=self._forcing_attrs['target_time_zone']
+        )[-1]
+
+        # Create the fileManager.txt content
+        # key names are not PEP8 standard as they are used in SUMMA
+        manager_dict = {
+            'controlVersion': 'SUMMA_FILE_MANAGER_V3.0.0',
+            'simStartTime': utils.format_date_string(self.settings['start_date']),
+            'simEndTime': utils.format_date_string(self.settings['end_date']),
+            'tmZoneInfo': self.auxillary['tz_info'],
+            'outFilePrefix': 'run',
+            'settingsPath': os.path.join(path, 'settings', 'SUMMA/'),
+            'forcingPath': os.path.join(path, 'forcing', 'SUMMA/'),
+            'outputPath': os.path.join(path, 'output', 'SUMMA/'),
+            'initConditionFile': 'coldState.nc',
+            'attributeFile': 'attributes.nc',
+            'trialParamFile': 'trialParams.nc',
+            'forcingListFile': 'forcingFileList.txt',
+            'decisionsFile': 'modelDecisions.txt',
+            'outputControlFile': 'outputControl.txt',
+            'globalHruParamFile': 'localParamInfo.txt',
+            'globalGruParamFile': 'basinParamInfo.txt',
+            'vegTableFile': 'TBL_VEGPARM.TBL',
+            'soilTableFile': 'TBL_SOILPARM.TBL',
+            'generalTableFile': 'TBL_GENPARM.TBL',
+            'noahmpTableFile': 'TBL_MPTABLE.TBL',
+            }
+
+        # If `kwargs` is provided, update the `manager_dict`
+        if kwargs:
+           for key, value in kwargs.items():
+                if key in manager_dict:
+                    manager_dict[key] = value
+                else:
+                    raise KeyError(f"Invalid key `{key}` in `kwargs`. "
+                                   "Check the documentation for valid keys.")
+
+        # Create the directories if they do not exist
+        dirs = ('settingsPath', 'forcingPath', 'outputPath')
+        for dir_key in dirs:
+            dir_path = manager_dict[dir_key]
+            if not os.path.exists(dir_path):
+                os.makedirs(dir_path, exist_ok=True)
+
+        # Write filemanager.txt content
+        template = self.jinja2_env.get_template("SUMMA_file_manager_template.jinja")
+        content = template.render(
+            manager_dict=manager_dict,
+            version=__version__,
+        )
+
+        if save:
+            # 1. initialize attributes
+            self.init_attrs(save=False)
+            _ds = self.attrs.drop_indexes(
+                ['hru', 'gru']  # drop indexes to avoid errors in SUMMA
+            )
+            _ds = _ds.reset_coords(
+                ['hru', 'gru'],  # reset coordinates to avoid errors in SUMMA
+                drop=True,
+            )
+            self._save_ds(
+                ds=_ds,
+                save=save,
+                save_path=os.path.join(
+                    manager_dict['settingsPath'],
+                    'attributes.nc'),
+            )
+
+            # 2. initialize forcing
+            self.init_forcing(
+                save=save,
+                save_nc_path=manager_dict['forcingPath'],
+                save_list_path=os.path.join(
+                    manager_dict['settingsPath'],
+                    'forcingFileList.txt'),
+            )
+
+            # 3. initialize cold state
+            self.init_cold_state(save=False)
+            _ds = self.cold_state.drop_indexes(
+                ['hru', 'midToto', 'midSoil', 'ifcToto', 'scalarv'],
+            )
+            _ds = _ds.reset_coords(
+                ['hru', 'midToto', 'midSoil', 'ifcToto', 'scalarv'],
+                drop=True,
+            )
+            self._save_ds(
+                ds=_ds,
+                save=save,
+                save_path=os.path.join(
+                    manager_dict['settingsPath'],
+                    'coldState.nc'),
+            )
+
+            # 4. initialize trial parameters
+            self.init_trial(save=False)
+            _ds = self.trial_params.drop_indexes(
+                ['hru', 'gru'],
+            )
+            _ds = _ds.reset_coords(
+                ['hru', 'gru'],
+                drop=True,
+            )
+            self._save_ds(
+                ds=_ds,
+                save=save,
+                save_path=os.path.join(
+                    manager_dict['settingsPath'],
+                    'trialParams.nc'),
+            )
+
+            # 5. initialize model decisions
+            self.init_decisions(
+                save=save,
+                save_path=os.path.join(
+                    manager_dict['settingsPath'],
+                    'modelDecisions.txt'),
+            )
+            # 6. initialize output control
+            self.init_template(
+                save=save,
+                save_path=os.path.join(
+                        manager_dict['settingsPath']),
+            )
+            # 7. initialize file manager
+            pathlib.Path(
+                os.path.join(
+                    manager_dict['settingsPath'],
+                    'fileManager.txt')
+                ).write_text(content, encoding='utf-8') 
+
+        return
 
     def _save_ds(
         self,
@@ -1033,7 +1260,6 @@ class SUMMAWorkflow:
         else: # for legibility
             pass
 
-
     # static methods
     @staticmethod
     def _cold_state_dim(
@@ -1061,6 +1287,8 @@ class SUMMAWorkflow:
         if not isinstance(var, str):
             raise TypeError(f'Invalid `{var}` variable type. It must be of '
                 'data type string.')
+        if var.lower() == 'mlayermatrichead':
+            return 'midSoil'
         if var.lower().startswith('mlayer'):
             return 'midToto'
         elif var.lower().startswith('ilayer'):
@@ -1499,7 +1727,7 @@ class SUMMAWorkflow:
             coords={
                 dim_name: layer.stats[stat_names].index.values,
             },
-            attrs={'unit': str(layer.unit)},
+            attrs={'units': str(layer.unit)},
             name=layer_name,
         )
 

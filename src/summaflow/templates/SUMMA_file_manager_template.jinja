@@ -1,0 +1,55 @@
+{#
+    useful assumptions
+    ==================
+    1. The input `decision_dict` dictionary must be prepared by Python3.7+
+       since it is ordered. The use of OrderedDict was avoided to provide
+       better memory usage, thought it would made the package compatible
+       with Python 3.1+
+#}
+{#
+    useful macros
+    =============
+#}
+{% macro calculate_padding(column, cursor) %}
+    {# move cursor to column number in the text file #}
+    {{- " " * (column - cursor - 1) -}}
+{% endmacro %}
+{% macro format_float(value, decimals) %}
+    {# define number of decimals for float values #}
+    {{- "%.decimalsf" | replace('decimals', decimals) | format(value) -}}
+{% endmacro %}
+{% macro calculate_padding_end(column, val, cursor) %}
+    {# define the padding given the column the `val' s length #}
+    {{- " " * (column - (val | string | length) - cursor - 1) -}}
+{% endmacro %}
+{#
+    SUMMA modelDecisions.txt file definitons
+    ========================================
+    containing 27 lines displaying model decisions along with proper comments
+    shown with an exclamation mark at the beginning of each line.
+    
+    reference:
+    ~~~~~~~~~~
+    - https://summa.readthedocs.io/en/latest/configuration/SUMMA_model_decisions/
+#}
+controlVersion      {{ "'" + manager_dict['controlVersion'] + "'" }}
+simStartTime        {{ "'" + manager_dict['simStartTime'] + "'" }}
+simEndTime          {{ "'" + manager_dict['simEndTime'] + "'" }}
+tmZoneInfo          {{ "'" + manager_dict['tmZoneInfo'] + "'" }}
+outFilePrefix       {{ "'" + manager_dict['outFilePrefix'] + "'" }}
+settingsPath        {{ "'" + manager_dict['settingsPath'] + "'" }}
+forcingPath         {{ "'" + manager_dict['forcingPath'] + "'" }}
+outputPath          {{ "'" + manager_dict['outputPath'] + "'" }}
+initConditionFile   {{ "'" + manager_dict['initConditionFile'] + "'" }}
+attributeFile       {{ "'" + manager_dict['attributeFile'] + "'" }}
+trialParamFile      {{ "'" + manager_dict['trialParamFile'] + "'" }}
+forcingListFile     {{ "'" + manager_dict['forcingListFile'] + "'" }}
+decisionsFile       {{ "'" + manager_dict['decisionsFile'] + "'" }}
+outputControlFile   {{ "'" + manager_dict['outputControlFile'] + "'" }}
+globalHruParamFile  {{ "'" + manager_dict['globalHruParamFile'] + "'" }}
+globalGruParamFile  {{ "'" + manager_dict['globalGruParamFile'] + "'" }}
+vegTableFile        {{ "'" + manager_dict['vegTableFile'] + "'" }}
+soilTableFile       {{ "'" + manager_dict['soilTableFile'] + "'" }}
+generalTableFile    {{ "'" + manager_dict['generalTableFile'] + "'" }}
+noahmpTableFile     {{ "'" + manager_dict['noahmpTableFile'] + "'" }}
+! Prepare by SUMMAFlow version {{ version -}}

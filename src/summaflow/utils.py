@@ -4,13 +4,13 @@ FIXME: Technically, the tools used here can be generalized for
        all models. Due to time limitation, some compromise were
        considered.
 """
-# Third-party libraries
+# built-in libraries
 import os
 
-# Built-in imports
-from collections import (
-    Counter,
-)
+from dateutil import parser
+from datetime import datetime
+from collections import Counter
+
 from typing import (
     Any,
     Dict,
@@ -18,9 +18,11 @@ from typing import (
     Set,
 )
 
+# Third-party libraries
 import geopandas as gpd
 import pandas as pd
 import xarray as xr
+
 from pandas.tseries.frequencies import to_offset
 from pint import UnitRegistry
 from pyproj import CRS
@@ -428,7 +430,24 @@ def is_file(
     path: PathLike | str,
     ext: Set[str],
 ) -> bool:
-    """Check if `path` ends in a filename considering the provided extension set"""
+    """Check if `path` ends in a filename considering the provided extension
+    set
+
+    Parameters
+    ----------
+    path : PathLike | str
+        The path to the file to be checked. It can be a string or a
+        PathLike object.
+    ext : Set[str]
+        A set of file extensions to check against. The extensions should
+        be provided in lowercase, with the leading dot (e.g., {'.txt', '.csv'}).
+
+    Returns
+    -------
+    bool
+        True if the path ends with one of the specified extensions, False
+        otherwise.
+    """
     path = os.fsdecode(path)  # handles PathLike objects too
     # Only working with lowercase letters
     path_ext = os.path.splitext(path)[1].lower()
@@ -439,3 +458,29 @@ def is_file(
     else:
         return False
 
+def format_date_string(
+    input_str: str,
+    date_format: str = "%Y-%m-%d %H:%M",
+) -> str:
+    """Format a date string to a specific format.
+
+    Parameters
+    ----------
+    input_str : str
+        The input date string to be formatted. It can be in various formats
+        recognized by `dateutil.parser`.
+
+    date_format : str, optional
+        The desired output format for the date string. Default is
+        "%Y-%m-%d %H:%M", which corresponds to 'YYYY-MM-DD HH:MM'.
+
+    Returns
+    -------
+    str
+        The formatted date string in the specified format.
+    """
+    # Parse the input string (handles almost any format)
+    dt = parser.parse(input_str)
+
+    # Format to 'YYYY-MM-DD HH:MM'
+    return dt.strftime(date_format)
