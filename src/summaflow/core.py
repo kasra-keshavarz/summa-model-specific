@@ -778,8 +778,21 @@ class SUMMAWorkflow:
             for var_name, attrs in forcing_local_attrs_default.items():
                 if var_name in ds:
                     ds[var_name].attrs.update(attrs)
+            # If `local` in self._forcing_attrs, update local attributes
+            if 'local' in self._forcing_attrs:
+                for var_name, attrs in self._forcing_attrs['local'].items():
+                    if var_name in ds:
+                        ds[var_name].attrs.update(attrs)
+                    else:
+                        warnings.warn(f"Variable `{var_name}` not found in "
+                            "forcing dataset; skipping local attributes "
+                            "update.")
+
             # Updating global attributes
             ds = ds.assign_attrs(forcing_global_attrs_default)
+            # If `global` in self._forcing_attrs, update global attributes
+            if 'global' in self._forcing_attrs:
+                ds.attrs.update(self._forcing_attrs['global'])
 
             # Specify dt_step from the data
             data_step = utils._freq_seconds(pd.infer_freq(ds.time))
