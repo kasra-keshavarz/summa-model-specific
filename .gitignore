@@ -163,3 +163,10 @@ cython_debug/
 
 # SUMAM stuff
 examples/
+
+# Mac stuff
+.DS_Store
+
+# rasters
+*.tif
+*.nc
