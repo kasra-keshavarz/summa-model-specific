@@ -834,10 +834,12 @@ class GeoLayer:
         self.stats = stats
 
         # Assign attributes if provided
-        if layer is not None:
-            self.layer = layer
-        if geom is not None:
-            self.geom = geom
+        #if layer is not None:
+        #    self.layer = layer
+        self.layer = layer
+        #if geom is not None:
+        #    self.geom = geom
+        self.geom = geom
 
         # GeoLayer engine for reading Geospatial files
         self._engine = engine

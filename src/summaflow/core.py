@@ -33,6 +33,7 @@ import pandas as pd
 import pint
 import pytz
 import xarray as xr
+import pint_xarray
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -578,7 +579,7 @@ class SUMMAWorkflow:
         contour = SUMMAWorkflow._geolayer_info(
             self.geospatial_data[_contour_name],
             _contour_name,
-            'mean',
+            'length',
             'hru')
         # 7.3 `downHRUindex` layer
         if self.verbose:
@@ -587,7 +588,7 @@ class SUMMAWorkflow:
         hru_index = SUMMAWorkflow._geolayer_info(
             self.geospatial_data[_hruidx_name],
             _hruidx_name,
-            'mean',
+            'index',
             'hru')
         # 7.4 `elevation` layer
         if self.verbose:
@@ -1052,7 +1053,7 @@ class SUMMAWorkflow:
                 logger.info(f"Target path is: {save_path}")
  
         # Using the package root to find the data directory
-        data_dir_path = self.package_root.joinpath('../../data')
+        data_dir_path = self.package_root.joinpath('data')
 
         for item in data_dir_path.iterdir():
             if item.is_file():
@@ -1299,9 +1300,15 @@ class SUMMAWorkflow:
             'simEndTime': utils.format_date_string(self.settings['end_date']),
             'tmZoneInfo': self.auxillary['tz_info'],
             'outFilePrefix': 'run',
-            'settingsPath': os.path.join(path, 'settings', 'SUMMA/'),
-            'forcingPath': os.path.join(path, 'forcing', 'SUMMA/'),
-            'outputPath': os.path.join(path, 'output', 'SUMMA/'),
+            'settingsPath': os.path.abspath(
+                os.path.join(path, 'settings','SUMMA/')
+                ),
+            'forcingPath': os.path.abspath(
+                os.path.join(path, 'forcing', 'SUMMA/')
+                ),
+            'outputPath': os.path.abspath(
+                os.path.join(path, 'output', 'SUMMA/')
+                ),
             'initConditionFile': 'coldState.nc',
             'attributeFile': 'attributes.nc',
             'trialParamFile': 'trialParams.nc',
