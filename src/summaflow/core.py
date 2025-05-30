@@ -1300,15 +1300,18 @@ class SUMMAWorkflow:
             'simEndTime': utils.format_date_string(self.settings['end_date']),
             'tmZoneInfo': self.auxillary['tz_info'],
             'outFilePrefix': 'run',
-            'settingsPath': os.path.abspath(
-                os.path.join(path, 'settings','SUMMA/')
-                ),
-            'forcingPath': os.path.abspath(
-                os.path.join(path, 'forcing', 'SUMMA/')
-                ),
-            'outputPath': os.path.abspath(
-                os.path.join(path, 'output', 'SUMMA/')
-                ),
+            'settingsPath': os.path.join(
+                os.path.abspath(path),
+                'settings',
+                'SUMMA/'),
+            'forcingPath': os.path.join(
+                os.path.abspath(path),
+                'forcing',
+                'SUMMA/'),
+            'outputPath': os.path.join(
+                os.path.abspath(path),
+                'output',
+                'SUMMA/'),
             'initConditionFile': 'coldState.nc',
             'attributeFile': 'attributes.nc',
             'trialParamFile': 'trialParams.nc',
