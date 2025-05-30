@@ -54,6 +54,7 @@ from .geospatial import (
     GeoLayer,
 )
 from .__about__ import __version__
+from .logging_config import setup_logger
 
 # Type definitions
 # Path type
@@ -64,6 +65,10 @@ except ImportError:  # for Python < 3.6
 
 # GIS object FID type
 FIDType: TypeAlias = Union[str, int, float]
+
+# Module-level logger
+logger = setup_logger(__name__, level=10)
+
 
 class SUMMAWorkflow:
     """
@@ -101,9 +106,11 @@ class SUMMAWorkflow:
         topology_unit_mapping: Dict[str, str],
         topology_to_unit_mapping: Dict[str, str],
         cold_state: Dict[str, Any],
-        geospatial_data: Optional[Dict[str, Dict]] = None,
-        dims: Optional[Dict[str, str]] = default_dims,
+        geospatial_data: Optional[Dict[str, Dict]],
         settings: Dict[str, Any] = {},
+        decisions: Dict[str, str] = {},
+        fillna: Dict[str, Dict] = {},
+        dims: Optional[Dict[str, str]] = default_dims,
         *args,
         **kwargs,
     ) -> None:
@@ -195,8 +202,6 @@ class SUMMAWorkflow:
         -------
 
         """
-        # routine error checks
-
         # assign necessary attributes
         # FIXME: This needs to turn into its own object, but for the
         #        sake of timing of this deliverable, we compromise and treat
@@ -275,12 +280,30 @@ class SUMMAWorkflow:
         )
         self.jinja2_env.globals['raise'] = raise_helper
 
+        # Registering model decisions
+        if decisions:
+            self.decisions = decisions
+        else:
+            self.decisions = None
+
+        # Registering fillna
+        self.fillna = fillna
+
+        # Defining verbosity variable
+        self.verbose = self.settings.get('verbose', False)
+        if self.verbose:
+            logger.info("SUMMA workflow initialized")
+
     # custom constructors
     @classmethod
     def from_maf(
         cls,
         layers: Dict[str, Dict] = None,
     ) -> Self:
+        """Construct a SUMMAWorkflow object from MAF-compatible files"""
+        logger.info("Constructing SUMMAWorkflow from MAF files")
+
+        logger.info("SUMMAWorkflow from MAF files is not implemented yet.")
 
         return
 
@@ -304,7 +327,8 @@ class SUMMAWorkflow:
         #        as an object and populated across models. In this
         #        work, we will only focus on main object.
         # forcing information
-        forcing_str = f"Forcing files: {self._forcing}"
+        forcing_files_len = len(self._forcing)
+        forcing_str = f"Forcing files: {forcing_files_len} files"
 
         # FIXME: In an ideal world, `self.topology` should be defined
         #        as an object and populated. In this work, we will
@@ -368,10 +392,19 @@ class SUMMAWorkflow:
         # We use `self.gru` to build the `gru` variable values
         # the keys to `variables` is mandated by `utils._init_empty_ds`
         # function
+        if self.verbose:
+            logger.info("Initializing attributes for SUMMA workflow...")
+
         if 'attrs' not in self.auxillary['init']:
             self.auxillary['init'].append('attrs')
         else:
             del self.attrs
+
+        # If necessary fields are not provided, raise an error
+        if 'measurement_height' not in self._forcing_attrs:
+            raise ValueError("`measurement_height` is a required field in `forcing_attrs`.")
+        if 'measurement_height_unit' not in self._forcing_attrs:
+            raise ValueError("`measurement_height_unit` is a required field in `forcing_attrs`.")
 
         # FIXME: this is a terrible way of doing things, `gru` and `riv`
         #        should be taken care of by Hydrant, and `hru` should be
@@ -387,6 +420,8 @@ class SUMMAWorkflow:
             'hru': self.hru[hru_fid],
         }
 
+        if self.verbose:
+            logger.info("Creating attributes xarray.Dataset")
         # create an empty xarray.Dataset to be populated with SUMMA-specific
         # attributes
         self.attrs = utils._init_empty_ds(
@@ -403,6 +438,8 @@ class SUMMAWorkflow:
         #    that is clearly instructed in the tutorial and API reference.
         #    2. `mHeight` is defined for each `hru` in SUMMA, therefore,
         #       hard-coded here.
+        if self.verbose:
+            logger.info("Adding `mHeight` attribute")
         _mheight_name = 'mHeight'
         self.attrs[_mheight_name] = SUMMAWorkflow._mheight(
             forcing_attrs=self._forcing_attrs,
@@ -414,8 +451,12 @@ class SUMMAWorkflow:
         # 2. `slopeTypeIndex` which is "a legacy that is no longer used"
         #     reference: github.com/CH-Earth/CWARHM: step 5/SUMMA/1/1
         # Note:
-        #     If needed, the hard-coded names & values here can be transformed
+        #   - If needed, the hard-coded names & values here can be transformed
         #     to be read from the input objects.
+        #   - If provided through the `geospatial_data`, it will be
+        #     overwritten.
+        if self.verbose:
+            logger.info("Adding `slopeTypeIndex` attribute")
         _slope_type_index_name = 'slopeTypeIndex'
         self.attrs[_slope_type_index_name] = SUMMAWorkflow._slope_type_index(
             slope_value=1,
@@ -426,6 +467,8 @@ class SUMMAWorkflow:
         # Note:
         #     If needed, the hard-coded names here can be transformed to be read
         #     from the input objects.
+        if self.verbose:
+            logger.info("Adding `hruId` and `gruId` attributes")
         _gru_id_name = 'gruId'
         _hru_id_name = 'hruId'
         self.attrs[_gru_id_name] = SUMMAWorkflow._elements(
@@ -444,6 +487,8 @@ class SUMMAWorkflow:
         #     The `topology` needs to become a systematic object using
         #     `hydrant` but unfortunately the project does not have much
         #     support.
+        if self.verbose:
+            logger.info("Adding `hru2gruId` attributes")
         _hru_mapping_gru_name = 'hru2gruId'
         mapping = SUMMAWorkflow._mapping_hru(
             gru=self.gru,
@@ -464,6 +509,9 @@ class SUMMAWorkflow:
         # First, calculate centroids; EPSG 6933 is hard-coded for accuracy
         # the returned object will contain data labels `centroid_y` and
         # `centroid_x`
+        if self.verbose:
+            logger.info("Calculating and adding `latitude` and `logitude` "
+                "attributes")
         coords_defs = {
             'latitude': 'centroid_x',
             'longitude': 'centroid_y',
@@ -481,6 +529,8 @@ class SUMMAWorkflow:
         #    includes a column named `area`.
         #    The unit of area is critical, so they have been assigned now;
         #    for all other variables, they are added later.
+        if self.verbose:
+            logger.info("Calculating and adding `area` attributes")
         areas = utils._calculate_polygon_areas(self.hru, target_area_unit='m^2')
         area_unit = str(areas['area'].pint.units)
         self.attrs['HRUarea'] = xr.DataArray(
@@ -499,7 +549,7 @@ class SUMMAWorkflow:
         #           a downstream HRU?]. Or, he uses the square root of HRU
         #           area.
         #    Mohamed: the length around the riparian zone (i.e., length of
-        #             stream *2).
+        #             stream * 2).
         #    Wouter: uses 30m constant value
         #
         # 9. `downHRUindex` values
@@ -508,9 +558,13 @@ class SUMMAWorkflow:
         #    Darri: sets the downHRUindex based on elevation data
         #    Mohamed: all constant 0 values
         #    Wouter: Set the downHRUindex based on elevation data
+        if self.verbose:
+            logger.info("Adding geospatial layers' attributes")
 
         # 7. `geospatial` layers
         # 7.1 `tan_slope` layer
+        if self.verbose:
+            logger.info("Adding `tan_slope` attributes")
         _slope_name = 'tan_slope'
         slope = SUMMAWorkflow._geolayer_info(
             self.geospatial_data[_slope_name],
@@ -518,6 +572,8 @@ class SUMMAWorkflow:
             'mean',
             'hru')
         # 7.2 `contourLength` layer
+        if self.verbose:
+            logger.info("Adding `contourLength` attributes")
         _contour_name = 'contourLength'
         contour = SUMMAWorkflow._geolayer_info(
             self.geospatial_data[_contour_name],
@@ -525,13 +581,17 @@ class SUMMAWorkflow:
             'mean',
             'hru')
         # 7.3 `downHRUindex` layer
+        if self.verbose:
+            logger.info("Adding `downHRUindex` attributes")
         _hruidx_name = 'downHRUindex'
         hru_index = SUMMAWorkflow._geolayer_info(
             self.geospatial_data[_hruidx_name],
             _hruidx_name,
             'mean',
             'hru')
-        # 7.4 `eleveation` layer
+        # 7.4 `elevation` layer
+        if self.verbose:
+            logger.info("Adding `elevation` attributes")
         _elv_name = 'elevation'
         elv = SUMMAWorkflow._geolayer_info(
             self.geospatial_data[_elv_name],
@@ -539,6 +599,8 @@ class SUMMAWorkflow:
             'mean',
             'hru')
         # 7.5 `vegTypeIndex` layer
+        if self.verbose:
+            logger.info("Adding `vegTypeIndex` attributes")
         _veg_name = 'vegTypeIndex'
         veg = SUMMAWorkflow._geolayer_info(
             self.geospatial_data[_veg_name],
@@ -546,6 +608,8 @@ class SUMMAWorkflow:
             'majority',
             'hru')
         # 7.6 `soilTypeIndex` layer
+        if self.verbose:
+            logger.info("Adding `soilTypeIndex` attributes")
         _soil_name = 'soilTypeIndex'
         soil = SUMMAWorkflow._geolayer_info(
             self.geospatial_data[_soil_name],
@@ -562,9 +626,20 @@ class SUMMAWorkflow:
             _soil_name: soil
         }
 
+        self._geolayers = _geolayers
+
+        # Fill invalid (<=0) values with `self.fillna` values in GeoLayers
+        for key in self.fillna['geospatial_data'].keys():
+            if key in _geolayers:
+                _geolayers[key] = self._fill_na(
+                    _geolayers[key],
+                    self.fillna['geospatial_data'][key])
+
         # Adding Geospatial layers to `self.attrs`
         self.attrs.update(_geolayers)
 
+        if self.verbose:
+            logger.info("Adding local and global attributes of the Dataset")
         # Updating local attributes
         # Assign attributes to each variable
         for var_name, attrs in attributes_local_attrs_default.items():
@@ -581,6 +656,9 @@ class SUMMAWorkflow:
             save=save,
             save_path=save_path
         )
+
+        if self.verbose:
+            logger.info("SUMMA attributes initialized successfully.")
 
         if return_ds:
             return self.attrs
@@ -614,11 +692,15 @@ class SUMMAWorkflow:
         - Only NetCDF files are supported as inputs.
  
         """
+        # Logging
+        if self.verbose:
+            logger.info("Initializing attributes for SUMMA workflow...")
+
         # If instructed to save, paths are necessary
         if save:
             if save_nc_path is None or save_list_path is None:
                 raise ValueError("Missing paths to save files.")
-        # Modify the init message
+        # Modify the init repr 
         self.auxillary['init'].append('forcing')
 
         # If the timezone is not provided, hard-coded assumption to `local`
@@ -632,6 +714,8 @@ class SUMMAWorkflow:
         else:
             _target_tz = 'local'
 
+        if self.verbose:
+            logger.info("Assigning timezone")
         # Specify the `forcing` and `target` timezones and also the string
         # for the "fileManager" in the axuillary dictionary
         forcing_tz, target_tz, tz_info = SUMMAWorkflow._specify_tz(_forcing_tz, _target_tz)
@@ -654,6 +738,10 @@ class SUMMAWorkflow:
             # Extract filename
             filename = os.path.basename(forcing)
 
+            # log forcing files being processed
+            if self.verbose:
+                logger.info(f"Processing forcing file: {filename}")
+
             # First read the forcing file, using Xarray
             ds = xr.open_dataset(forcing)
 
@@ -661,7 +749,7 @@ class SUMMAWorkflow:
             ds.time.encoding = {}
             ds.time.encoding = SUMMAWorkflow._specify_time_encodings(ds.time)
 
-            # Specify the `dt_time` or time-step period in seconds
+            # Specify the `dt_init` or time-step period in seconds
             if 'dt_init' not in self.auxillary.keys():
                 self.auxillary['dt_init'] = utils._freq_seconds(pd.infer_freq(ds.time))
 
@@ -693,6 +781,11 @@ class SUMMAWorkflow:
             # Updating global attributes
             ds = ds.assign_attrs(forcing_global_attrs_default)
 
+            # Specify dt_step from the data
+            data_step = utils._freq_seconds(pd.infer_freq(ds.time))
+            # Add `data_step`
+            ds['data_step'] = float(data_step)
+
             # Saving if instructed
             if save:
                 # Save files
@@ -714,6 +807,9 @@ class SUMMAWorkflow:
         # Warn user if files are not being saved
         if not save:
             warnings.warn('Forcing files processed without being saved.')
+
+        if self.verbose:
+            logger.info("Forcing dataset processed/initialized successfully.")
 
         if return_ds:
             # Just a representation---really rough return
@@ -740,6 +836,10 @@ class SUMMAWorkflow:
 
 
         """
+        # Logging
+        if self.verbose:
+            logger.info("Initializing cold state")
+
         # Modify init repr string
         if 'cold_state' not in self.auxillary['init']:
             self.auxillary['init'].append('cold_state')
@@ -793,20 +893,32 @@ class SUMMAWorkflow:
             if not isinstance(layers[_v], (int, float)):
                 raise TypeError(f"`{_v}` value must be a number.")
 
+        if self.verbose:
+            logger.info("Calculating `iLayerHeight` from `mLayerDepth`")
         # `iLayerHeight` need be calculated based on `mLayerDepth`
         ilayerheight = [float(0)] + list(itertools.accumulate(states['mLayerDepth']))
 
+        if self.verbose:
+            logger.info("Calculating dimensions for cold state")
         # Calculating dimensions based on the inputs
         # FIXME: `nSoil` and `nSnow` should not be hardcoded below
         ## `midToto`: mid layer indices of all soil plus snow layers
+        if self.verbose:
+            logger.info("Calculating `midToto`")
         mid_toto = np.arange(int(layers['nSoil']) + int(layers['nSnow']))
         ## `midSoil`: mid layer indices of all soil layers
+        if self.verbose:
+            logger.info("Calculating `midSoil`")
         mid_soil = np.arange(int(layers['nSoil']))
         ## `ifcToto`: interfaces between all layers in the combined soil
         ##            and snow profile (including top and bottom)
+        if self.verbose:
+            logger.info("Calculating `ifcToto`")
         ifc_toto = np.arange(int(layers['nSoil']) + int(layers['nSnow']) + 1)
         ## `scalarv`: scalar variables and parameters (degenerate dimension)
         ##            hard-coded to 1
+        if self.verbose:
+            logger.info("Assigning `scalarv` to 1")
         scalarv = np.arange(1)
 
         # Defining basic dimensions and variables for the file
@@ -824,6 +936,8 @@ class SUMMAWorkflow:
         # Variables for the cold state object;
         # FIXME: `nSoil` and `nSnow` should be also processed like the state
         #        variable
+        if self.verbose:
+            logger.info("Adding variables: `hruId`, `dt_init`, `nSoil`, and `nSnow`")
         cold_state_variables = {
             'hruId': ('hru', self.hru[hru_fid]),
             'dt_init': (('scalarv', 'hru'), [[self.auxillary['dt_init']] * _hru_len]),
@@ -838,6 +952,8 @@ class SUMMAWorkflow:
 
         # Additional `state` variables added by users
         for var in states.keys():
+            if self.verbose:
+                logger.info(f"Adding variables: `{var}`")
             # make an array out of the input variables
             value = np.asarray(states[var])
 
@@ -845,6 +961,8 @@ class SUMMAWorkflow:
             dim_one = SUMMAWorkflow._cold_state_dim(var)
             dims = (dim_one, 'hru')
             dims_lengths = [len(cold_state_coords[dim]) for dim in dims]
+            if self.verbose:
+                logger.info(f"    dimensions: {dims} with lengths {dims_lengths}")
 
             # if shape is zero, meaning a 0-dimensional array, make it
             # one dimensional
@@ -871,11 +989,15 @@ class SUMMAWorkflow:
             cold_state_variables[var] = (dims, repeated_value)
 
         # Creating an empty xarray.Dataset for the file
+        if self.verbose:
+            logger.info(f"Adding variables to the `cold_state` Dataset")
         self.cold_state = xr.Dataset(
             data_vars=cold_state_variables,
             coords=cold_state_coords,
         )
 
+        if self.verbose:
+            logger.info(f"Updating `cold_state` Dataset's local and global attributes")
         # Updating local attributes
         # Assign attributes to each variable
         for var_name, attrs in cold_state_local_attrs_default.items():
@@ -887,6 +1009,8 @@ class SUMMAWorkflow:
         )
 
         # Assure the order of dimensions are similar to that of self.attrs
+        if self.verbose:
+            logger.info(f"Reordering `cold_state` hrus and grus to match dimensions of `attrs`")
         self.cold_state = self.cold_state.reindex(dims=self.attrs.dims)
 
         # Saving if instructed
@@ -907,8 +1031,12 @@ class SUMMAWorkflow:
         save_path: Optional[PathLike | str] = None,
     ) -> None:
         """Copying template files for SUMMA runs"""
+        if self.verbose:
+            logger.info("Preparing template files to copy if instructed")
         if save:
             os.makedirs(save_path, exist_ok=True)
+            if self.verbose:
+                logger.info(f"Target path is: {save_path}")
  
         # Using the package root to find the data directory
         data_dir_path = self.package_root.joinpath('../../data')
@@ -916,7 +1044,12 @@ class SUMMAWorkflow:
         for item in data_dir_path.iterdir():
             if item.is_file():
                 with as_file(item) as src_path:
+                    if self.verbose:
+                        logger.info(f"Copying file: {item.name}")
                     shutil.copy2(src_path, os.path.join(save_path, item.name))
+
+        if self.verbose:
+            logger.info("Template files initialized successfully.")
 
         return
 
@@ -929,15 +1062,21 @@ class SUMMAWorkflow:
         """Preparing trialParams.nc file for SUMMA setups.
         This should ideally facilitate calibration, so the progress made on
         this front has not been included here."""
+        if self.verbose:
+            logger.info("Preparing trial parameters Dataset")
         # Defining basic dimensions and variables for the file
         hru_fid = self.topology_attrs.get('hru_fid')
         gru_fid = self.topology_attrs.get('gru_fid')
 
+        if self.verbose:
+            logger.info("Adding `hru` and `gru` dimensions to the Dataset")
         # Coordinate variables
         trial_params_coords = {
             'hru': self.hru[hru_fid],
             'gru': self.gru[gru_fid],
         }
+        if self.verbose:
+            logger.info("Adding `hruId` and `gruId` variables to the Dataset")
         # Variables for the trial object;
         trial_params_variables = {
             'hruId': ('hru', self.hru[hru_fid]),
@@ -950,6 +1089,8 @@ class SUMMAWorkflow:
             coords=trial_params_coords,
         )
 
+        if self.verbose:
+            logger.info(f"Updating `trial_params` Dataset's local and global attributes")
         # Updating local attributes
         # Assign attributes to each variable
         for var_name, attrs in trial_params_local_attrs_default.items():
@@ -960,6 +1101,8 @@ class SUMMAWorkflow:
             trial_params_global_attrs_default
         )
 
+        if self.verbose:
+            logger.info(f"Reordering `trial_params` hrus and grus to match dimensions of `attrs`")
         # Assure the order of dimensions are similar to that of self.attrs
         self.trial = self.trial.reindex(dims=self.attrs.dims)
 
@@ -971,6 +1114,8 @@ class SUMMAWorkflow:
                 save_path=save_path
             )
 
+        if self.verbose:
+            logger.info("Trial parameters Dataset initialized successfully.")
         if return_ds:
             return self.trial_params
         else:
@@ -983,22 +1128,45 @@ class SUMMAWorkflow:
         save_path: Optional[PathLike | str] = None,
     ) -> Optional[pd.DataFrame]:
         """Preparing modelDecisions.txt file for SUMMA setups."""
+        if self.verbose:
+            logger.info("Preparing model decisions")
         # Jinja2 template for model decisions
         template = self.jinja2_env.get_template("SUMMA_model_decisions_template.jinja")
 
         # Reading the default model decisions
-        self.decisions = model_decisions_default
+        if self.verbose:
+            logger.info("Populating default model decisions")
 
+        # Temporary decision dictionary
+        _decisions = model_decisions_default.copy()
+
+        # If the decisions are provided, update the default ones
         if self.decisions is not None:
-            # If the decisions are provided, update the default ones
-            for key, value in self.decisions.items():
-                if key in model_decisions_default:
-                    model_decisions_default[key] = value
-                else:
-                    raise KeyError(f"Invalid key `{key}` in `decisions` dictionary. "
+            for key, value in _decisions['models'].items():
+                if key in self.decisions:
+                    if self.decisions[key] != _decisions['models'][key]:
+                        # Logging
+                        if self.verbose:
+                            logger.info(f"    Modifying decision `{key}` with `{self.decisions[key]}`")
+                        # Exchange default decision with user-provided one
+                        _decisions['models'][key] = self.decisions[key]
+
+            for key in self.decisions.keys():
+                if key not in _decisions['models']:
+                    warnings.warn(f"Invalid key `{key}` in `decisions` dictionary. "
                                    "Check the documentation for valid keys.")
+        else:
+            # Logging
+            if self.verbose:
+                logger.info("Using default model decisions as no user-provided ones")
+
+        # exchanging user-provided decisions with the populated _decisions
+        # object
+        self.decisions = _decisions
 
         # create content
+        if self.verbose:
+            logger.info("Rendering model decisions template")
         content = template.render(
             decisions_dict=self.decisions,
             version=__version__,
@@ -1008,6 +1176,9 @@ class SUMMAWorkflow:
 
         if save:
             pathlib.Path(save_path).write_text(content, encoding='utf-8') 
+
+        if self.verbose:
+            logger.info("Model decisions rendered successfully.")
 
         if return_dict:
             return self.decisions
@@ -1063,8 +1234,15 @@ class SUMMAWorkflow:
         KeyError
             If an invalid key is provided in `kwargs`.
         """
+        if self.verbose:
+            logger.info(f"Running SUMMA workflow")
         # If path is not provided, use the model_path
-        path = self.settings['model_path']
+        if not path:
+            path = self.settings['model_path']
+        else:
+            # If path is a PathLike object, convert it to string
+            if isinstance(path, PathLike):
+                path = str(path)
 
         # Make sure the path exists
         os.makedirs(path, exist_ok=True)
@@ -1242,6 +1420,10 @@ class SUMMAWorkflow:
         """Save the dataset to the defined path"""
         # Save the file
         if save:
+            # Logging
+            if self.verbose:
+                logger.info(f"Saving dataset to {save_path}")
+
             if isinstance(save_path, (PathLike, str)):
                 # Create the directory
                 if utils.is_file(save_path, {'.nc', '.nc4'}):
@@ -1259,6 +1441,29 @@ class SUMMAWorkflow:
                     " or string object.")
         else: # for legibility
             pass
+
+    def _fill_na(
+        self,
+        arr: np.array,
+        fill_value: float,
+    ) -> np.array:
+        """Fill invalid values in an array with a specified fill value.
+
+        Parameters
+        ----------
+        arr : np.arraylike
+            The input array to fill invalid values.
+        fill_value : float
+            The value to replace invalid values with.
+
+        Returns
+        -------
+        np.arraylike
+            The array with invalid values replaced by the fill value.
+        """
+        arr[arr <= 0] = fill_value
+
+        return arr
 
     # static methods
     @staticmethod

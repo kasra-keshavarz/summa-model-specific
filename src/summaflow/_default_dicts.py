@@ -208,6 +208,8 @@ forcing_local_attrs_default = {
     'windspd': {
         },
     'data_step': {
+        'long_name': 'Length of time step',
+        'units': 'second',
         },
 }
 
