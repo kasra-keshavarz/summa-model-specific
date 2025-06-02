@@ -388,6 +388,11 @@ class Stats:
         # returning a view not a copy
         view = self.data.loc[:, cols].squeeze()
 
+        if view.shape == (1, 1):
+            view = view.iloc[:, 0]
+        else:
+            view = view.squeeze()
+
         return view
 
     def __setitem__(
