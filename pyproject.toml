@@ -11,7 +11,7 @@ requires-python = ">=3.8"
 license = "MIT"
 keywords = []
 authors = [
-  { name = "Kasra Farmer", email = "kasra.keshavarz1@ucalgary.ca" },
+  { name = "Kasra Keshavarz", email = "kasra.keshavarz1@ucalgary.ca" },
   { name = "Darri Eythorsson", email = "darri.eythorsson@ucalgary.ca" },
   { name = "Mohamed Moghairib", email = "mohamedismaiel.ahmed@ucalgary.ca" },
   { name = "Wouter Knoben", email = "wouter.knoben@ucalgary.ca" },
