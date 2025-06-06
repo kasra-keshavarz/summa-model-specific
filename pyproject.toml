@@ -11,7 +11,7 @@ requires-python = ">=3.8"
 license = "MIT"
 keywords = []
 authors = [
-  { name = "Kasra Farmer", email = "kasra.keshavarz1@ucalgary.ca" },
+  { name = "Kasra Keshavarz", email = "kasra.keshavarz1@ucalgary.ca" },
   { name = "Darri Eythorsson", email = "darri.eythorsson@ucalgary.ca" },
   { name = "Mohamed Moghairib", email = "mohamedismaiel.ahmed@ucalgary.ca" },
   { name = "Wouter Knoben", email = "wouter.knoben@ucalgary.ca" },
@@ -29,8 +29,6 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-  "coverage[toml]>=6.5",
-  "pytest",
   "pint-xarray>=0.2.1",
   "Jinja2>=3.1.6",
   "pint-pandas>=0.7.1",
@@ -38,15 +36,21 @@ dependencies = [
   "geopandas>=0.13.2",
   "pandas>=1.4.0",
   "numpy>=1.22.2",
-  "typing_extensions>=4.7.1",
   "click>=8.1.2",
   "netCDF4>=1.6.4",
+  "typing_extensions; python_version < '3.11'"
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest",
+  "coverage[toml]>=6.5"
 ]
 
 [project.urls]
-Documentation = "https://github.com/Kasra Farmer/summaflow#readme"
-Issues = "https://github.com/Kasra Farmer/summaflow/issues"
-Source = "https://github.com/Kasra Farmer/summaflow"
+Documentation = "https://github.com/Kasra-keshavarz/summaflow#readme"
+Issues = "https://github.com/Kasra-keshavarz/summaflow/issues"
+Source = "https://github.com/Kasra-keshavarz/summaflow"
 
 [tool.hatch.version]
 path = "src/summaflow/__about__.py"

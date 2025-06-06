@@ -1,5 +1,4 @@
 """Geospatial related workflows"""
-# 3rd party libraries
 # built-in libraries
 import os
 import re
@@ -15,9 +14,14 @@ from typing import (
     Dict,
     List,
     Optional,
-    Self,
 )
 
+try:
+    from typing import Self  # Python 3.11+
+except ImportError:
+    from typing_extensions import Self  # For Python <3.11
+
+# 3rd party libraries
 import geopandas as gpd
 import numpy as np
 import pandas as pd

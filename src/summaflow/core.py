@@ -19,12 +19,16 @@ from typing import (
     Any,
     Dict,
     Optional,
-    Self,
     Sequence,
     Tuple,
     TypeAlias,
     Union,
 )
+
+try:
+    from typing import Self  # Python 3.11+
+except ImportError:
+    from typing_extensions import Self  # For Python <3.11
 
 # 3rd party libraries
 import geopandas as gpd
