@@ -12,6 +12,7 @@ import os
 import pathlib
 import shutil
 import warnings
+import json
 
 from importlib.resources import files, as_file
 
@@ -311,6 +312,45 @@ class SUMMAWorkflow:
         logger.info("SUMMAWorkflow from MAF files is not implemented yet.")
 
         return
+
+    @classmethod
+    def from_dict(
+        cls: 'SUMMAWorkflow',
+        init_dict: Dict = {},
+    ) -> 'SUMMAWorkflow':
+        """
+        Constructor to use a dictionary to instantiate
+        """
+        if len(init_dict) == 0:
+            raise KeyError("`init_dict` cannot be empty")
+        assert isinstance(init_dict, dict), "`init_dict` must be a `dict`"
+
+        return cls(**init_dict)
+
+    @classmethod
+    def from_json(
+        cls: 'SUMMAWorkflow',
+        json_str: str,
+    ) -> 'SUMMAWorkflow':
+        """
+        Constructor to use a loaded JSON string
+        """
+        # building customized SUMMAWorkflow's JSON string decoder object
+        decoder = json.JSONDecoder(object_hook=SUMMAWorkflow._json_decoder)
+        json_dict = decoder.decode(json_str)
+        # return class instance
+        return cls.from_dict(json_dict)
+
+    @classmethod
+    def from_json_file(
+        cls: 'SUMMAWorkflow',
+        json_file: 'str',
+    ) -> 'SUMMAWorkflow':
+        """
+        Constructor to use a JSON file path
+        """
+        with open(json_file) as f:
+            json_dict = json.load(f, object_hook=SUMMAWorkflow._json_decoder)
 
     # virtual properties
     @property

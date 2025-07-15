@@ -38,8 +38,12 @@ dependencies = [
   "numpy>=1.22.2",
   "click>=8.1.2",
   "netCDF4>=1.6.4",
-  "typing_extensions; python_version < '3.11'"
+  "typing_extensions; python_version < '3.11'",
+  "click>=8.2.1",
 ]
+
+[project.scripts]
+summaflow = "summaflow.cli.main:main"
 
 [project.optional-dependencies]
 test = [
