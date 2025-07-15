@@ -101,117 +101,202 @@ class SUMMAWorkflow:
     # main constructor
     def __init__(
         self,
-        forcing_data: Sequence[str | os.PathLike],
-        forcing_attrs: Dict[str, str],
-        forcing_name_mapping: Dict[str, str],
-        forcing_unit_mapping: Dict[str, str],
-        forcing_to_unit_mapping: Dict[str, str],
-        topology_data: Dict[str, str | int],
-        topology_attrs: Dict[str, str],
-        topology_unit_mapping: Dict[str, str],
-        topology_to_unit_mapping: Dict[str, str],
-        cold_state: Dict[str, Any],
-        geospatial_data: Optional[Dict[str, Dict]],
+        forcing_data: Sequence[str | os.PathLike] = [],
+        forcing_attrs: Dict[str, str] = {},
+        forcing_name_mapping: Dict[str, str] = {},
+        forcing_unit_mapping: Dict[str, str] = {},
+        forcing_to_unit_mapping: Dict[str, str] = {},
+        topology_data: Dict[str, str | int] = {},
+        topology_attrs: Dict[str, str] = {},
+        topology_unit_mapping: Dict[str, str] = {},
+        topology_to_unit_mapping: Dict[str, str] = {},
+        cold_state: Dict[str, Any] = {},
+        geospatial_data: Optional[Dict[str, Dict]] = None,
         settings: Dict[str, Any] = {},
         decisions: Dict[str, str] = {},
         fillna: Dict[str, Dict] = {},
         dims: Optional[Dict[str, str]] = default_dims,
-        *args,
         **kwargs,
     ) -> None:
-
         """
-        Main constructor of SUMMAWorkflow
+        Initialize a SUMMA workflow configuration. All input arguments are
+        considered optional to ease independence of various configuration
+        stages.
 
         Parameters
         ----------
-        forcing_data : a sequence of :obj:`str` or |PathLike|
-            A sequence to NetCDF files describing forcing data for the
-            SUMMA application of interest.
-        forcing_vars : :obj:`dict` of :obj:`str`
-            The keys are the variable names included in `forcing_files`
-            that should be included in the final forcing dataset(s). The
-            corresponding values are the accepted names SUMMA needs.
-        forcing_units : :obj:`dict` of :obj:`str` keys and values
-            The keys are the **accepted** variable names for SUMMA, and
-            values are the original units provided in `forcing_files`.
-            The units follow the standards of Pint's `default_en.txt`
-            manual. See the relevant reference.
-        forcing_to_units : :obj:`dict` of :obj:`str` keys and values
-            The keys are the **accepted** variable names for SUMMA, and
-            values are the **accepted**  units for SUMMA. The units
-            follow the standards of Pint's `default_en.txt` manual. See
-            the relevant reference.
-        forcing_attrs : :obj:`dict`
-            The keys are **acceptable** values of forcing variables
-            SUMMA needs, and values are dictionaries of local attributes
-            that need to be included in SUMMA's forcing file.
-        topology_data : :obj:`dict` of :obj:`str` or |GeoDataFrame| Sequences
-            Topology data generally consists of auxillary data needed to
-            analyze `riv`, `cat`, and `hru` objects. The keys are the
-            :obj:`str` of each mentioned objects, and values include data
-            labels in each object needed to be included in the final
-            model setup.
-        topology_units : :obj:`dict`
-            Original units for all data labels included in `topology_data`
-            elements
-        topology_to_units : :obj:`dict`
-            **Acceptable** units of all data labels included in
-            `topology_data` elements SUMMA requires
-        topology_attrs : :obj:`dict` of str
-            Containing necessary attributes and metadata. **Necessary** keys
-            are 
-        geospatial_data : :obj:`dict`
-            Additional geospatial data used in parameterizing SUMMA.
-            Acceptable keys are:
-               * *heightCanopyTop*
-               * *vegTypeIndex*
-               * *soilTypeIndex*
-               * *elevation*
-        dims : :obj:`dict`, optional
-            Critical dimnesion names. Acceptable keys are *hru* and *gru*.
+        forcing_data : Sequence[str | os.PathLike], optional
+            Sequence of paths to NetCDF files containing forcing data for SUMMA.
+        forcing_attrs : Dict[str, str], optional
+            Dictionary of attributes for forcing variables. Must include
+            'measurement_height' and 'measurement_height_unit' keys.
+        forcing_name_mapping : Dict[str, str], optional
+            Mapping between variable names in forcing files and SUMMA-accepted names.
+            Keys are source names, values are SUMMA-accepted names.
+        forcing_unit_mapping : Dict[str, str], optional
+            Original units for forcing variables. Keys are SUMMA-accepted names,
+            values are original units (following Pint's default_en.txt standards).
+        forcing_to_unit_mapping : Dict[str, str], optional
+            Target units for forcing variables. Keys are SUMMA-accepted names,
+            values are required SUMMA units (following Pint's default_en.txt standards).
+        topology_data : Dict[str, str | int], optional
+            Topology data including river, catchment, and HRU information.
+            Expected keys:
+            - 'riv': Path or GeoDataFrame for river network
+            - 'cat': Path or GeoDataFrame for catchment polygons (GRUs)
+            - 'hru': Path or GeoDataFrame for HRU polygons
+        topology_attrs : Dict[str, str], optional
+            Attributes for topology data. Must include:
+            - 'gru_fid': Common label between river and catchment data
+            - 'hru_fid': Mapping between HRU and GRU values
+        topology_unit_mapping : Dict[str, str], optional
+            Original units for topology variables.
+        topology_to_unit_mapping : Dict[str, str], optional
+            Target units for topology variables required by SUMMA.
+        cold_state : Dict[str, Any], optional
+            Dictionary defining initial conditions for model state variables.
+            Expected structure:
 
-        Note
-        ----
-        The following lists the elements of `topology_data`
-        topology_vars : :obj:`dict` of :obj:`str` keys and values
-            Topology variables needed from the objects read through
-            `topology_data`. Critical keys are: *segId*, *downSegId*,
-            *slope*, *length*, *hruToSegId*, *tan_slope*. Any other
-            additional labels will be added to SUMMA's Attribute NetCDF
-            file for user's convenience.
-        riv : :obj:`str` or |PathLike| or |GeoDataFrame|
-           River graph object. Either the path to the object should be
-           given or a geopandas.GeoDataFrame containing information
-           provided in `topology`. This aids in understanding the
-           topology of the river system and hierarchical order of its
-           connectivity.
-        cat : :obj:`str` or |PathLike| or |GeoDataFrame|
-           Basin polygon(s) object. Either the path to the object
-           should be given or a geopandas.GeoDataFrame containing
-           information provided in `topology`. This object usually
-           serves as GRU information for SUMMA applications.
-        hru : :obj:`str` or |PathLike| or |GeoDataFrame|
-           HRU polygon(s) object. Either the path to the object
-           should be given or a geopandas.GeoDataFrame containing
-           information provided in `topology`. This object serves
-           as HRU information for SUMMA applications. If it equals to
-           `None`, then each HRU will be equal to GRU elements.
-        `topology_attrs` needs the following keys:
-           1. *gru_fid* that is a common label shared between `riv` and `cat`,
-           2. *hru_fid* that maps `hru` values to `gru`,
-        `forcing_attrs` needs the following keys:
-           * mHeight
+            .. code-block:: python
 
-        Example
-        -------
+                {
+                    'layers': {
+                        'nSoil': int,  # Number of soil layers (e.g., 8)
+                        'nSnow': int   # Number of snow layers (e.g., 0 for no snow)
+                    },
+                    'states': {
+                        # Scalar states (single global value or sequence of values per HRU)
+                        'scalarCanopyIce': float       # Initial canopy ice [kg/m²]
+                        'scalarCanopyLiq': float       # Initial canopy liquid [kg/m²]
+                        'scalarSnowDepth': float       # Initial snow depth [m]
+                        'scalarSWE': float             # Initial snow water equivalent [m]
+                        'scalarSfcMeltPond': float     # Surface melt pond storage [m]
+                        'scalarAquiferStorage': float  # Initial aquifer storage [m]
+                        'scalarSnowAlbedo': float      # Initial snow albedo [0-1]
+                        'scalarCanairTemp': float      # Canopy air temperature [K]
+                        'scalarCanopyTemp': float      # Canopy temperature [K]
 
+                        # Layer states (array per layer and HRU)
+                        'mLayerTemp': float | List[float]       # Layer temperatures [K]
+                        'mLayerVolFracIce': float | List[float] # Volumetric ice fraction [m³/m³]
+                        'mLayerVolFracLiq': float | List[float] # Volumetric liquid fraction [m³/m³]
+                        'mLayerMatricHead': float | List[float] # Matric head [m]
+                        'mLayerDepth': List[float]              # Layer depths [m] (e.g., [0.025, 0.075,...])
+                    }
+                }
+
+            Typical cold start values assume:
+            - No snow cover (nSnow=0, scalarSWE=0)
+            - Moist soil (mLayerVolFracLiq=0.4)
+            - 10°C initial temperature (283.16K)
+            - Moderate aquifer storage (0.4m)
+        geospatial_data : Optional[Dict[str, Dict]], optional
+            Geospatial attributes for SUMMA parameterization. Expected structure:
+
+            .. code-block:: python
+
+                {
+                    'elevation': GeoLayer(**{
+                        'stats': Stats(ArrayLike),  # Must include `mean` index
+                        'unit': str
+                    }),
+                    'soilTypeIndex': {
+                        'stats': Stats(ArrayLike),  # Must include `majority` index
+                        'unit': str
+                    }),
+                    'vegTypeIndex': {
+                        'stats': Stats(ArrayLike),  # Must include `majority` index
+                        'unit': str
+                    }),
+                    'tan_slope': {
+                        'stats': Stats(ArrayLike),  # Must include `mean` index
+                        'unit': str
+                    }),
+                    'contourLength': {
+                        'stats': Stats(ArrayLike),  # Must include `length` index
+                        'unit': str
+                    }),
+                    'downHRUindex': {
+                        'stats': Stats(ArrayLike),  # Must include `index` index
+                        'unit': str
+                    }),
+                }
+
+        settings : Dict[str, Any], optional
+            Model configuration settings. Structure:
+
+            .. code-block:: python
+
+                {
+                    'model_path': str,           # Path to SUMMA settings directory
+                    'start_date': str,           # Simulation start datetime
+                    'end_date': str,             # Simulation end datetime
+                    'verbose': bool,             # Enable verbose output
+                }
+
+        decisions : Dict[str, str], optional
+            Model process decisions. The keys are SUMMA-accepted model options
+            and the corresponding values are available modelling decisions. If
+            a decision is not provided, default SUMMA values will be
+            consdiered.
+        fillna : Dict[str, Dict], optional
+            Fill values for missing data.
+
+            .. code-block:: python
+
+                {
+                    'geospatial_data': {
+                        'elevation': float,    # Fill value for missing elevation
+                        'soilTypeIndex': int,  # Fill value for missing soil types
+                        'vegTypeIndex': int,   # Fill value for missing vegetation
+                        'tan_slope': float,    # Fill value for missing slopes
+                        'contourLength': float # Fill value for missing contours
+                    }
+                }
+
+        dims : Optional[Dict[str, str]], optional
+            Critical dimension names. Expected keys:
+            - 'hru': Hydrologic Response Unit dimension
+            - 'gru': Grouped Response Unit dimension
+        **kwargs
+            Additional keyword arguments.
+
+        Notes
+        -----
+        Topology Data Requirements:
+        - 'topology_vars' dictionary should include these critical variables:
+            * 'segId': Segment identifiers
+            * 'downSegId': Downstream segment identifiers
+            * 'slope': Segment slope
+            * 'length': Segment length
+            * 'hruToSegId': HRU to segment mapping
+            * 'tan_slope': Tangent of slope
+        - If 'hru' is not provided, each HRU will be equivalent to GRU elements.
+        Geospatial Data Requirements:
+        - ``Stats`` object requirements:
+            * elevation: must include ``mean`` stat
+            * soilTypeIndex: must include ``majority`` stat
+            * vegTypeIndex: must include ``majority`` stat
+            * tan_slope: must include ``mean`` stat
+            * contourLength: must include ``length`` stat
+            * downHRUindex: must include ``index`` stat
+        Unit Handling:
+        - All unit specifications should follow Pint's default_en.txt standards.
+        - Unit conversion is automatically handled when both original and target units are provided.
+        - In cases where target unit cannot be specified, this conversion will
+          be taken care of internally.
         """
         # assign necessary attributes
         # FIXME: This needs to turn into its own object, but for the
         #        sake of timing of this deliverable, we compromise and treat
-        #        them as different variables starting with `forcing_`.
-        self._forcing = sorted(forcing_data)
+        #        them as different variables with `forcing_` prefix.
+        # `forcing_data` needs to be a sequence of paths
+        if isinstance(forcing_data, Sequence) and not \
+            isinstance(forcing_data, (bytes, str)):
+            self._forcing = sorted(forcing_data)
+        else:
+            self._forcing = None
+
         self.forcing_vars = forcing_name_mapping
         self._forcing_attrs = forcing_attrs
         self.forcing_units = forcing_unit_mapping
@@ -369,7 +454,7 @@ class SUMMAWorkflow:
 
         return repr_str
 
-    # object methods
+    # instance methods
     def init_attrs(
         self,
         return_ds: bool = False,
@@ -771,7 +856,11 @@ class SUMMAWorkflow:
                 self._ureg)
 
             # Assure the order of dimensions are similar to that of self.attrs
-            ds = ds.reindex(dims=self.attrs.dims)
+            if hasattr(self, 'attrs'):
+                ds = ds.reindex(dims=self.attrs.dims)
+            else:
+                warnings.warn('Dimensions not sorted, run'
+                    ' `init_attrs(...)` method first.')
 
             # Change timezone and assing tz-naive datetime64[ns] timestamps
             if target_tz not in ('local'):
