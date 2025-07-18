@@ -13,6 +13,8 @@ import pathlib
 import shutil
 import warnings
 import json
+import glob
+import re
 
 from importlib.resources import files, as_file
 
@@ -58,6 +60,7 @@ from ._default_dicts import (
 )
 from .geospatial import (
     GeoLayer,
+    Stats,
 )
 from .__about__ import __version__
 from .logging_config import setup_logger
@@ -389,14 +392,107 @@ class SUMMAWorkflow:
     @classmethod
     def from_maf(
         cls,
-        layers: Dict[str, Dict] = None,
+        forcing_data: PathLike | str = None, # type: ignore
+        topology_data: Dict[str, PathLike | str] = {}, # type: ignore
+        geospatial_data: Optional[Dict[str, Dict]] = None, # type: ignore
+        **kwargs,
     ) -> Self:
         """Construct a SUMMAWorkflow object from MAF-compatible files"""
         logger.info("Constructing SUMMAWorkflow from MAF files")
+        # forcing_data: Sequence[str | os.PathLike] = [],
+        # forcing_attrs: Dict[str, str] = {},
+        # forcing_name_mapping: Dict[str, str] = {},
+        # forcing_unit_mapping: Dict[str, str] = {},
+        # forcing_to_unit_mapping: Dict[str, str] = {},
+        # topology_data: Dict[str, str | int] = {},
+        # topology_attrs: Dict[str, str] = {},
+        # topology_unit_mapping: Dict[str, str] = {},
+        # topology_to_unit_mapping: Dict[str, str] = {},
+        # cold_state: Dict[str, Any] = {},
+        # geospatial_data: Optional[Dict[str, Dict]] = None,
+        # settings: Dict[str, Any] = {},
+        # decisions: Dict[str, str] = {},
+        # fillna: Dict[str, Dict] = {},
+        # dims: Optional[Dict[str, str]] = default_dims,
+        # **kwargs,
+        # making default assumptions
+        forcing_to_unit_mapping = {
+            'pptrate': 'millimeter / second',
+            'airtemp': 'kelvin',
+            'airpres': 'pascal',
+            'LWRadAtm': 'watt / meter ** 2',
+            'SWRadAtm': 'watt / meter ** 2',
+            'spechum': 'dimensionless',
+            'windspd': 'meter / second',
+        }
 
-        logger.info("SUMMAWorkflow from MAF files is not implemented yet.")
+        # building forcing data list
+        forcing_data_obj = glob.glob(os.path.join(forcing_data, '**/*.nc*'), recursive=True)
 
-        return
+        # topology data
+        topology_data_obj = {k: gpd.read_file(v) for k, v in topology_data.items() if k in ['riv', 'cat', 'hru']}
+
+        # geospatial data
+        # layers needed by the setup workflow
+        # elevation
+        elv = GeoLayer.from_maf(
+            maf_stats=geospatial_data['elevation'],
+            maf_layer=None,
+            maf_geolayer=os.path.join(topology_data['cat']),
+            unit = 'meters',
+        )
+        # landcover
+        landcover = GeoLayer.from_maf(
+            maf_stats=geospatial_data['vegTypeIndex'],
+            maf_layer=None,
+            maf_geolayer=os.path.join(topology_data['cat']),
+            unit = 'dimensionless',
+        )
+        # USDA soil classes
+        soil = GeoLayer.from_maf(
+            maf_stats=geospatial_data['soilTypeIndex'],
+            maf_layer=None,
+            maf_geolayer=os.path.join(topology_data['cat']),
+            unit = 'dimensionless',
+        )
+
+        # custom layers for `tan_slope`, `contourLength` and `downHRUindex`
+        # until relevant workflows are implemented inside `gistool`--sorry
+        # For now, look at various constructors for "GeoLayer"
+        slope = GeoLayer( # workflow needs `mean` stat
+            stats=Stats(pd.DataFrame([0.1] * len(topology_data_obj['cat']), index=topology_data_obj['cat']['COMID'], columns=['mean'])),
+            unit='dimensionless',
+        )
+        contour = GeoLayer( # workflow needs `length` stat
+            stats=Stats(
+                pd.DataFrame(
+                    topology_data_obj['cat'].set_crs(epsg=4326).to_crs('ESRI:54009').length, index=topology_data_obj['cat']['COMID'], columns=['length'])),
+            unit='meter',
+        )
+        hru_index = GeoLayer( # workflow needs `index` "stat"
+            stats=Stats(pd.DataFrame([0] * len(topology_data_obj['cat']), index=topology_data_obj['cat']['COMID'], columns=['index'])),
+            unit='dimensionless',
+        )
+        # build the geospatial_data_obj dictionary
+        geospatial_data_obj = {
+            'elevation': elv,
+            'vegTypeIndex': landcover,
+            'soilTypeIndex': soil,
+            'tan_slope': slope,
+            'contourLength': contour,
+            'downHRUindex': hru_index
+        }
+
+        # build the class instance
+        instance = cls(
+            forcing_data=forcing_data_obj,
+            forcing_to_unit_mapping=forcing_to_unit_mapping,
+            topology_data=topology_data_obj,
+            geospatial_data=geospatial_data_obj,
+            **kwargs
+        )
+
+        return instance
 
     @classmethod
     def from_dict(
@@ -436,6 +532,20 @@ class SUMMAWorkflow:
         """
         with open(json_file) as f:
             json_dict = json.load(f, object_hook=SUMMAWorkflow._json_decoder)
+
+    @classmethod
+    def _from_maf_json_file(
+        cls: 'SUMMAWorkflow',
+        json_file: 'str',
+    ) -> 'SUMMAWorkflow':
+        """
+        Constructor to use a MAF-compatible JSON file path
+        """
+        with open(json_file) as f:
+            json_dict = json.load(f, object_hook=SUMMAWorkflow._json_decoder)
+
+        # build the class instance
+        return cls.from_maf(**json_dict)
 
     # virtual properties
     @property
