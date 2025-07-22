@@ -15,6 +15,7 @@ import warnings
 import json
 import glob
 import re
+import numbers
 
 from importlib.resources import files, as_file
 
@@ -399,23 +400,7 @@ class SUMMAWorkflow:
     ) -> Self:
         """Construct a SUMMAWorkflow object from MAF-compatible files"""
         logger.info("Constructing SUMMAWorkflow from MAF files")
-        # forcing_data: Sequence[str | os.PathLike] = [],
-        # forcing_attrs: Dict[str, str] = {},
-        # forcing_name_mapping: Dict[str, str] = {},
-        # forcing_unit_mapping: Dict[str, str] = {},
-        # forcing_to_unit_mapping: Dict[str, str] = {},
-        # topology_data: Dict[str, str | int] = {},
-        # topology_attrs: Dict[str, str] = {},
-        # topology_unit_mapping: Dict[str, str] = {},
-        # topology_to_unit_mapping: Dict[str, str] = {},
-        # cold_state: Dict[str, Any] = {},
-        # geospatial_data: Optional[Dict[str, Dict]] = None,
-        # settings: Dict[str, Any] = {},
-        # decisions: Dict[str, str] = {},
-        # fillna: Dict[str, Dict] = {},
-        # dims: Optional[Dict[str, str]] = default_dims,
-        # **kwargs,
-        # making default assumptions
+
         forcing_to_unit_mapping = {
             'pptrate': 'millimeter / second',
             'airtemp': 'kelvin',
@@ -463,16 +448,19 @@ class SUMMAWorkflow:
             stats=Stats(pd.DataFrame([0.1] * len(topology_data_obj['cat']), index=topology_data_obj['cat']['COMID'], columns=['mean'])),
             unit='dimensionless',
         )
+
         contour = GeoLayer( # workflow needs `length` stat
             stats=Stats(
                 pd.DataFrame(
-                    topology_data_obj['cat'].set_crs(epsg=4326).to_crs('ESRI:54009').length, index=topology_data_obj['cat']['COMID'], columns=['length'])),
+                    topology_data_obj['cat'].to_crs('ESRI:54009').length.to_list(), index=topology_data_obj['cat']['COMID'], columns=['length'])),
             unit='meter',
         )
+
         hru_index = GeoLayer( # workflow needs `index` "stat"
             stats=Stats(pd.DataFrame([0] * len(topology_data_obj['cat']), index=topology_data_obj['cat']['COMID'], columns=['index'])),
             unit='dimensionless',
         )
+
         # build the geospatial_data_obj dictionary
         geospatial_data_obj = {
             'elevation': elv,
@@ -2231,11 +2219,19 @@ class SUMMAWorkflow:
         if unit:
             layer.to_unit(unit)
 
+        if isinstance(layer.stats[stat_names], numbers.Real):
+            # If stat_names is a single value, convert it to a list
+            stat_values = [layer.stats[stat_names]]
+        else:
+            # If stat_names is a sequence, use it as is
+            stat_values = layer.stats[stat_names]
+
         da = xr.DataArray(
-            data=layer.stats[stat_names],
+            data=stat_values,
             coords={
-                dim_name: layer.stats[stat_names].index.values,
+                dim_name: layer.stats.data.index.values,
             },
+            dims=[dim_name],
             attrs={'units': str(layer.unit)},
             name=layer_name,
         )
