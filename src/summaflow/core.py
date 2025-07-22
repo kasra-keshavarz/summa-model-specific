@@ -342,8 +342,13 @@ class SUMMAWorkflow:
         # Workflow settings
         self.settings = settings
         # Make the directory for the outputs
-        if self.settings['model_path']:
-            os.makedirs(self.settings['model_path'], exist_ok=True)
+        if 'model_path' in self.settings:
+            try:
+                os.makedirs(self.settings['model_path'], exist_ok=True)
+            except ValueError as e:
+                raise ValueError(f"Invalid model path: {self.settings['model_path']}") from e
+            except OSError as e:
+                pass
 
         # Pint unit registry
         self._ureg = pint.UnitRegistry(force_ndarray_like=True)
