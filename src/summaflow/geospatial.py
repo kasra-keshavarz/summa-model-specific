@@ -427,7 +427,6 @@ class Stats:
         # add the relevant columns of stats to the `.data`
         self.data = pd.concat([self.data, df], axis=1)
 
-
     def __repr__(
         self: Self,
     ) -> pd.DataFrame:
@@ -865,7 +864,6 @@ class GeoLayer:
         # Assign first instance unit
         self._unit = self._ureg(unit).units
 
-
     # class methods
     @classmethod
     def from_maf(
@@ -987,7 +985,6 @@ class GeoLayer:
         # turn into a Pint.Unit object
         self._unit = self._ureg(unit_value).units
 
-
     @property
     def engine(
         self: Self,
@@ -1009,7 +1006,6 @@ class GeoLayer:
             raise ValueError("`engine` must be either `gdal` or `rasterio`.")
 
         self._engine = _engine
-
 
     # Object's methods
     def plot(
