@@ -547,6 +547,44 @@ class SUMMAWorkflow:
         # build the class instance
         return cls.from_maf(**json_dict)
 
+    @staticmethod
+    def _env_var_decoder(s):
+        """
+        OS environmental variable decoder
+        """
+        # RE patterns
+        env_pat = r'\$(.*?)/'
+        bef_pat = r'(.*?)\$.*?/?'
+        aft_pat = r'\$.*?(/.*)'
+        # strings after re matches
+        e = re.search(env_pat, s).group(1)
+        b = re.search(bef_pat, s).group(1)
+        a = re.search(aft_pat, s).group(1)
+        # extract environmental variable
+        v = os.getenv(e)
+        # return full: before+env_var+after
+        if v:
+            return b+v+a
+        return s
+
+    @staticmethod
+    def _json_decoder(obj):
+        """
+        Decoding typical JSON strings returned into valid Python objects
+        """
+        if obj in ["true", "True", "TRUE"]:
+            return True
+        elif obj in ["false", "False", "FALSE"]:
+            return False
+        elif isinstance(obj, str):
+            if '$' in obj:
+                return SUMMAWorkflow._env_var_decoder(obj)
+            if SUMMAWorkflow._is_valid_integer(obj):
+                return int(obj)
+        elif isinstance(obj, dict):
+            return {SUMMAWorkflow._json_decoder(k): SUMMAWorkflow._json_decoder(v) for k, v in obj.items()}
+        return obj
+ 
     # virtual properties
     @property
     def cat(
@@ -2203,3 +2241,11 @@ class SUMMAWorkflow:
         )
 
         return da
+
+    @staticmethod
+    def _is_valid_integer(s):
+        try:
+            int(s)
+            return True
+        except ValueError:
+            return False

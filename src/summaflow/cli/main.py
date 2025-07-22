@@ -15,18 +15,13 @@ def main(json_file, output_path):
         click.echo(f"Loading workflow from {json_file}")
         workflow = SUMMAWorkflow._from_maf_json_file(json_file)
 
-        # Save results if output path is provided
-        if output_path:
-            click.echo(f"Saving results to {output_path}")
-            workflow.save(output_path)
-        else:
-            click.echo("No output path specified, results not saved")
-
-        click.echo("Workflow completed successfully!")
-
         # Execute the workflow
         click.echo("Running workflow...")
-        workflow.run(save=True, save_path=output_path)
+        workflow.run(save=True, path=output_path)
+
+        click.echo(f"Saving results to {output_path}")
+        click.echo("Workflow completed successfully!")
+
 
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
