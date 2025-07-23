@@ -1075,6 +1075,15 @@ class SUMMAWorkflow:
             # Add `data_step`
             ds['data_step'] = float(data_step)
 
+            # Find the dimension other than 'time' and rename it to 'subbasin'
+            dims_to_rename = {dim: 'subbasin' for dim in ds.dims if dim != 'time'}
+            ds = ds.rename_dims(dims_to_rename)
+            # Also change the variable name of `dims_to_rename` if such a variable
+            # exists in the dataset
+            for old_dim, new_dim in dims_to_rename.items():
+                if old_dim in ds.variables:
+                    ds = ds.rename_vars({old_dim: new_dim})
+
             # Saving if instructed
             if save:
                 # Save files
